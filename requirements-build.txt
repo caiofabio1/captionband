@@ -1,0 +1,23 @@
+# What goes INTO the installer. Deliberately smaller than requirements.txt:
+#
+# - faster-whisper / ctranslate2 / argostranslate (Whisper local) pull in
+#   stanza, sympy and ~1 GB of model tooling. Whisper local stays a
+#   "pip install" extra for developers; the app tells the operator the
+#   package is missing if that provider is selected.
+# - google-cloud-* brings gRPC (~100 MB) for a provider most setups never use.
+# - scipy only improves the 16->24 kHz resampler for OpenAI Realtime; the
+#   numpy fallback is fine for speech and saves ~80 MB.
+#
+# Building from the global site-packages instead of a venv with THIS file
+# made PyInstaller crawl every package on the machine (measured: sympy and
+# stanza in the log) — build in .venv-build, always.
+azure-cognitiveservices-speech>=1.40.0
+sounddevice>=0.4.7
+soundcard>=0.4.6
+numpy>=1.26.0
+PyQt6>=6.7.0
+openai>=1.0.0
+keyring>=25.0.0
+keyboard>=0.13.5
+websocket-client>=1.7.0
+requests>=2.31.0

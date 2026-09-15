@@ -1,0 +1,47 @@
+[project]
+name = "captionband"
+version = "0.6.0"
+description = "Real-time webinar translation desktop app — Azure / Google / Groq / Whisper local — overlay PyQt6"
+authors = [{ name = "Caio Fábio Schlechta Portella" }]
+license = { file = "LICENSE" }
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [
+    ".venv",
+    "build",
+    "dist",
+    "Output",
+    "graphify-out",
+    "__pycache__",
+    ".graphify_*.py",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "E501",   # line length handled by formatter, not blocking
+    "B008",   # function calls in argument defaults (PyQt patterns)
+    "RUF001", # ambiguous unicode characters (we use × ▶ ⚙ on purpose)
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E", "F", "B"]  # tests can be looser
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-v --tb=short"

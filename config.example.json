@@ -1,0 +1,35 @@
+{
+  "source_languages": ["pt-BR", "es-ES", "en-US"],
+  "target_languages": ["es"],
+
+  "display_mode": "original_plus_translation",
+  "_display_mode_options": [
+    "translations_only",
+    "original_plus_translation",
+    "translations_only_multi"
+  ],
+
+  "audio": {
+    "device_name": null,
+    "_device_name_help": "null = default output (loopback). Set string to match a specific device substring.",
+    "samplerate": 16000,
+    "channels": 1
+  },
+
+  "overlay": {
+    "position": "bottom",
+    "_position_options": ["top", "middle", "bottom"],
+    "width_ratio": 0.8,
+    "background_opacity": 0.85,
+    "primary_font_size": 36,
+    "secondary_font_size": 22,
+    "primary_color": "#FFFFFF",
+    "secondary_color": "#CCCCCC",
+    "outline_color": "#000000",
+    "padding": 24,
+    "max_history": 1,
+    "click_through": false,
+    "fade_ms": 200,
+    "max_chars": 220
+  }
+}
