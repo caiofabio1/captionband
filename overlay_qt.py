@@ -155,6 +155,55 @@ class CaptionOverlay(QWidget):
         self._idle_timer.setSingleShot(True)
         self._idle_timer.timeout.connect(self._clear_all)
 
+        self._watch_screens()
+
+    def _watch_screens(self) -> None:
+        """Reposition the band when the monitor layout changes.
+
+        _screen() already falls back to the primary monitor when the
+        configured one is gone, but nothing ever re-ran _apply_position():
+        a projector unplugged mid-event left the window at coordinates that
+        belonged to a screen that no longer exists — off every real screen.
+        """
+        app = QGuiApplication.instance()
+        if app is None:
+            return
+        app.screenAdded.connect(self._on_screen_added)
+        app.screenRemoved.connect(self._on_screen_removed)
+        for s in QGuiApplication.screens():
+            s.virtualGeometryChanged.connect(
+                self._on_virtual_geometry_changed,
+                Qt.ConnectionType.UniqueConnection)
+
+    def _on_screen_added(self, screen) -> None:
+        log.info("screen connected: %s — repositioning the caption", screen.name())
+        try:
+            screen.virtualGeometryChanged.connect(
+                self._on_virtual_geometry_changed,
+                Qt.ConnectionType.UniqueConnection)
+        except Exception:
+            log.exception("could not watch the new screen's geometry")
+        self._apply_position()
+
+    def _on_screen_removed(self, screen) -> None:
+        configured = getattr(self.overlay_config, "screen_name", "") or ""
+        if configured and screen.name() == configured:
+            # The projector left in the middle of the event. The band moves
+            # to the primary screen — a caption on the wrong screen beats no
+            # caption — but the operator needs to know WHY it moved.
+            log.warning(
+                "the screen configured for the caption (%s) was disconnected; "
+                "falling back to the primary screen", configured)
+        else:
+            log.info("screen disconnected: %s — repositioning the caption",
+                     screen.name())
+        self._apply_position()
+
+    def _on_virtual_geometry_changed(self, _rect) -> None:
+        # Monitors rearranged in "extend" mode: the same screen now lives at
+        # different coordinates, so the saved geometry is stale.
+        self._apply_position()
+
     # ------------------------------------------------------------------ window setup
 
     def _setup_window(self) -> None:

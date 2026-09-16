@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — revisão de código em 3 frentes (2026-09-16)
+
+Revisão independente do pipeline, da UI/persistência e da esteira de release.
+189 testes (143 anteriores + 46 novos), ruff limpo.
+
+- **Race na troca de provider podia deixar sessão órfã cobrando e reverter a
+  config.** O sinal `_swap_result` não carregava geração: swap de idioma em
+  voo + Parar + Iniciar instalava o provider velho por cima do novo. Agora
+  todo swap carrega um token de geração, incrementado também no `stop()`, e
+  resultados defasados são descartados (com o provider tardio parado).
+- **Fallback e stall-recovery não congelam mais a GUI.** Os dois caminhos de
+  recuperação automática faziam swap síncrono na thread da GUI (1,3–1,6 s de
+  I/O bloqueante, medido); agora usam o caminho assíncrono, e falha de swap
+  tem retry com backoff 2/5/10 s em vez de depender do watchdog de 45 s.
+- **`openai_realtime` não podia ser salvo pela UI.** `is_valid()` não tinha
+  branch para o provider e o Save rejeitava com mensagem enganosa. Há teste
+  que itera `PROVIDER_LABELS` exigindo comportamento definido por provider.
+- **Falha no Credential Manager não apaga mais a chave.** O campo só sai do
+  `config.json` se a escrita no keyring confirmar; em falha, `log.critical`
+  e o valor é preservado. `load_config` valida formato (JSON não-objeto,
+  sub-dicts inválidos) com quarentena, e faz coerção por campo com fallback
+  individual — um campo podre não derruba os demais nem o boot.
+- **Overlay reage a hot-plug de monitor.** `screenAdded`/`screenRemoved`/
+  `virtualGeometryChanged` disparam reposicionamento com `log.warning`
+  quando a tela da legenda some; o combo de telas das Configurações é
+  re-populado a cada abertura da janela (projetor plugado com o dialog
+  aberto agora aparece).
+- **Google não declara mais `ordered_by_protocol=True`.** O STT é ordenado,
+  mas o final traduzido saía de um pool com ≥2 workers e podia completar
+  fora de ordem com o gate do app desligado. Agora o seq é atribuído no
+  STT-final e o ReorderGate do app ordena — mesmo contrato dos demais
+  providers em bloco.
+- **OpenRouter não falha mais em silêncio.** Erros de STT (HTTP ≠ 200,
+  exceções) chamam `report_exception`; 401/403 viram FATAL/auth no tray em
+  vez de "sala silenciosa" com tray verde.
+- **Backpressure nos providers em bloco (Groq, Whisper local, Cerebras,
+  OpenRouter).** Fila limitada com drop-oldest (liberando o slot do reorder
+  gate) e aviso DEGRADED throttled — sem mais latência crescente nem
+  centenas de MB de PCM acumulado em eventos longos. Pool de tradução
+  multi-alvo passa a ser persistente (um executor por utterance antes).
+- **Resample 16→24 kHz com estado (OpenAI Realtime).** O filtro era
+  redesenhado e aplicado bloco a bloco, gerando cliques de borda; agora um
+  resampler com carry vê sinal contínuo. `audio_emitted_at_ms` é carimbado
+  na chegada do áudio (a latência exibida não lê mais ~0).
+- **Azure `push_audio` lê a push stream sob lock dedicado** (ordem de locks
+  documentada; a thread de captura nunca espera o lock do reconnect).
+- **`GOOGLE_APPLICATION_CREDENTIALS` restaurada no `stop()`** — a mutação
+  process-wide não vaza mais para fora do provider.
+- **`usage_tracker` cobre `openai_realtime`** (US$ 2,04/h por idioma-alvo) —
+  o provider mais caro do catálogo aparecia como custo zero.
+- **Esteira de release:** CI roda `rehearsal.py`, matrix alinhada a
+  `requires-python` (3.11–3.13), timeouts nos jobs, ruff pinado igual ao
+  pre-commit (`requirements-dev.txt`), build com lock
+  (`requirements-build.lock`), CI compila o instalador Inno e smoke-testa o
+  exe com o novo flag `--version`; `translator.spec` usa
+  `collect_submodules('providers')` e `SPECPATH`; teste novo falha se
+  `APP_VERSION`, `installer.iss` e `pyproject.toml` divergirem;
+  `requirements.txt` inclui `keyboard` e `requests` e dropa `python-dotenv`
+  (era dependência morta, com `.env.example` enganoso — removido).
+
 ### Fixed — revisão adversarial completa (2026-09-15, tarde)
 
 Diagnóstico a partir do `app.log` do operador (8.994 linhas, 154 lançamentos),
