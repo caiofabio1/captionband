@@ -126,6 +126,19 @@ class TestComApartment:
         """The end-to-end check the reverted fix would have failed."""
         from audio_capture import AudioCapture
 
+        # A headless runner (or VM) can have zero WASAPI render endpoints;
+        # resolving the default speaker then dies with 0x80070490
+        # (ERROR_NOT_FOUND). Real capture is impossible there — skip, the
+        # same way scipy-dependent tests skip when scipy is absent.
+        try:
+            import soundcard as sc
+
+            speaker = sc.default_speaker()
+        except Exception:
+            speaker = None
+        if speaker is None:
+            pytest.skip("no WASAPI output device on this machine")
+
         got: list[int] = []
         cap = AudioCapture(on_audio=lambda b: got.append(len(b)), blocksize_ms=50)
         cap.start()
