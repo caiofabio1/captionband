@@ -25,7 +25,12 @@ from __future__ import annotations
 import base64
 import logging
 
-from .base import OnTranslationCallback, ProviderCapabilities
+from .base import (
+    CODE_AUTH,
+    STATUS_FATAL,
+    OnTranslationCallback,
+    ProviderCapabilities,
+)
 from .groq import GroqProvider
 
 log = logging.getLogger(__name__)
@@ -140,8 +145,9 @@ class OpenRouterProvider(GroqProvider):
         """Hit /audio/transcriptions directly with JSON body containing base64."""
         try:
             import requests
-        except ImportError:
+        except ImportError as exc:
             log.error("`requests` package required for OpenRouter /audio/transcriptions")
+            self.report_exception(exc, "stt (missing requests)")
             return None
         try:
             b64 = base64.b64encode(wav_bytes).decode("ascii")
@@ -165,6 +171,18 @@ class OpenRouterProvider(GroqProvider):
                     "openrouter /audio/transcriptions %d: %s",
                     resp.status_code, resp.text[:300],
                 )
+                # A silent None here is how a dead key becomes a "quiet room"
+                # behind a green tray icon. Report every failure; a 401/403
+                # will never heal by retrying, so it is FATAL.
+                if resp.status_code in (401, 403):
+                    self.emit_status(STATUS_FATAL, CODE_AUTH)
+                else:
+                    self.report_exception(
+                        RuntimeError(
+                            f"/audio/transcriptions HTTP {resp.status_code}: "
+                            f"{resp.text[:300]}"),
+                        "stt",
+                    )
                 return None
             data = resp.json()
             text = (data.get("text") or "").strip()
@@ -172,6 +190,7 @@ class OpenRouterProvider(GroqProvider):
             return text, lang
         except Exception as exc:
             log.error("openrouter /audio/transcriptions error: %s", exc)
+            self.report_exception(exc, "stt")
             return None
 
     def _fallback_source_lang(self) -> str | None:
@@ -209,4 +228,7 @@ class OpenRouterProvider(GroqProvider):
             return text, None
         except Exception as exc:
             log.error("openrouter /chat/completions audio error: %s", exc)
+            # Same contract as every other provider: a failure that only
+            # reaches the log is a silent "quiet room" for the operator.
+            self.report_exception(exc, "stt (chat audio)")
             return None

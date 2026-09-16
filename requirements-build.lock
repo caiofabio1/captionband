@@ -1,0 +1,17 @@
+# Exact pins for reproducible builds (requirements-build.txt keeps the
+# human-maintained minimum floors; THIS file is what build.bat and CI
+# actually install when present).
+#
+# Pins taken from `pip freeze` / `pip index versions` on the maintainer
+# machine (2026-09). Regenerate with pip-compile on the next build:
+#   pip-compile requirements-build.txt -o requirements-build.lock
+azure-cognitiveservices-speech==1.51.2
+sounddevice==0.5.6
+soundcard==0.4.6
+numpy==2.4.4
+PyQt6==6.11.0
+openai==3.14.1
+keyring==25.7.0
+keyboard==0.13.5
+websocket-client==1.9.2
+requests==2.33.1

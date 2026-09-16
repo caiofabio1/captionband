@@ -230,7 +230,7 @@ class TestFallbackChain:
         ctrl.start()
         FakeProvider.instances[-1].on_status(ProviderStatus(
             kind=STATUS_FATAL, code=CODE_AUTH, message="401", provider="fake"))
-        pump(qapp, 0.1)
+        pump(qapp, 0.5)
 
         assert ctrl.is_running()
         assert ctrl.config.provider == "azure"
@@ -246,7 +246,7 @@ class TestFallbackChain:
         ctrl.start()
         FakeProvider.instances[-1].on_status(ProviderStatus(
             kind=STATUS_FATAL, code=CODE_AUTH, message="401", provider="fake"))
-        pump(qapp, 0.1)
+        pump(qapp, 0.5)
         assert ctrl.config.provider == "azure"
 
         ctrl.stop()

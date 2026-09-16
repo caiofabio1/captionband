@@ -58,6 +58,18 @@ class GroqProvider(TranslationProvider):
         streaming=False,
         label="Groq (Whisper turbo + Llama)",
     )
+
+    # Backpressure cap: how many chunks may sit QUEUED (submitted but not yet
+    # started) before we drop the oldest one. The executor's own queue is
+    # unbounded, and when the network makes a chunk take longer than the
+    # speech that produced it, that queue becomes a latency accumulator:
+    # every caption still arrives, just later and later — tens of seconds
+    # behind by mid-event — pinning hundreds of MB of PCM over a long event.
+    # A live caption 30 s late is worse than a dropped one.
+    MAX_PENDING_CHUNKS = 10
+    # Throttle for the DEGRADED warning so a slow stretch does not spam it.
+    BACKPRESSURE_WARN_INTERVAL_S = 30.0
+
     def __init__(
         self,
         api_key: str,
@@ -84,7 +96,16 @@ class GroqProvider(TranslationProvider):
         self._stt_client = None
         self._translation_client = None
         self._executor: ThreadPoolExecutor | None = None
+        # Persistent pool for the per-utterance multi-target translation
+        # fan-out (a fresh ThreadPoolExecutor per utterance paid thread-spawn
+        # cost on every sentence of the event).
+        self._translation_pool: ThreadPoolExecutor | None = None
         self._buffer: ChunkedAudioBuffer | None = None
+        # (seq, future) of chunks submitted to _executor and not known to be
+        # finished. Backlog accounting for the drop-oldest cap above.
+        self._pending: list = []
+        self._pending_lock = threading.Lock()
+        self._last_backpressure_warning = 0.0
         self._lock = threading.Lock()
         self._running = False
 
@@ -105,6 +126,16 @@ class GroqProvider(TranslationProvider):
             # 5 workers handle ~2s chunks at ~1.5s each => can sustain
             # continuous speech without backlog.
             self._executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix="groq-worker")
+            # Separate pool for the translation fan-out: a _process_chunk
+            # worker must never wait on the SAME pool it runs in (a 5-worker
+            # pool with 5 chunks waiting on their own fan-outs deadlocks).
+            self._translation_pool = ThreadPoolExecutor(
+                max_workers=max(2, len(self.target_languages)),
+                thread_name_prefix="groq-translate",
+            )
+            with self._pending_lock:
+                self._pending = []
+            self._last_backpressure_warning = 0.0
             # ChunkedAudioBuffer enforces max_chunk_s itself (default 5s).
             # We pass user's chunk_seconds as the cap.
             self._buffer = ChunkedAudioBuffer(
@@ -139,6 +170,11 @@ class GroqProvider(TranslationProvider):
             if self._executor is not None:
                 self._executor.shutdown(wait=False, cancel_futures=True)
                 self._executor = None
+            if self._translation_pool is not None:
+                self._translation_pool.shutdown(wait=False, cancel_futures=True)
+                self._translation_pool = None
+            with self._pending_lock:
+                self._pending = []
             self._buffer = None
             self._stt_client = None
             self._translation_client = None
@@ -159,11 +195,52 @@ class GroqProvider(TranslationProvider):
     def _on_chunk(self, pcm: bytes) -> None:
         if self._executor is None:
             return
-        import time as _t
-        emitted_at_ms = _t.monotonic() * 1000
+        emitted_at_ms = time.monotonic() * 1000
         seq = self._sequence
         self._sequence += 1
-        self._executor.submit(self._process_chunk, seq, pcm, emitted_at_ms)
+        fut = self._executor.submit(self._process_chunk, seq, pcm, emitted_at_ms)
+        self._enforce_backlog_cap(seq, fut)
+
+    def _enforce_backlog_cap(self, seq: int, fut) -> None:
+        """Drop the OLDEST queued chunk when the backlog passes the cap.
+
+        Only queued (not-yet-started) chunks are droppable; one already
+        running leaves the accounting and releases its own seq when it
+        finishes. A dropped chunk MUST release its reorder-gate slot, or
+        every later caption waits on a chunk that will never arrive.
+        """
+        dropped: list[int] = []
+        with self._pending_lock:
+            self._pending = [(s, f) for s, f in self._pending if not f.done()]
+            self._pending.append((seq, fut))
+            while len(self._pending) > self.MAX_PENDING_CHUNKS:
+                old_seq, old_fut = self._pending.pop(0)
+                if old_fut.cancel():
+                    dropped.append(old_seq)
+        for old_seq in dropped:
+            log.warning(
+                "groq backlog: dropping queued chunk seq=%s "
+                "(processing is slower than speech)", old_seq)
+            self._release_empty(old_seq)
+        if dropped:
+            self._report_backpressure()
+
+    def _report_backpressure(self) -> None:
+        """Tell the operator chunks are being dropped — throttled.
+
+        Without this, a slow stretch presents as mysteriously incomplete
+        captions behind a green tray icon.
+        """
+        now = time.monotonic()
+        if now - self._last_backpressure_warning < self.BACKPRESSURE_WARN_INTERVAL_S:
+            return
+        self._last_backpressure_warning = now
+        self.emit_status(
+            STATUS_DEGRADED,
+            CODE_UNKNOWN,
+            "Processando mais devagar que a fala — descartando chunks para a "
+            "legenda não atrasar.",
+        )
 
     def _process_chunk(self, seq: int, pcm: bytes, emitted_at_ms: float) -> None:
         """Transcribe + translate one chunk.
@@ -367,8 +444,18 @@ class GroqProvider(TranslationProvider):
             if txt:
                 out[tgt] = txt
         else:
-            with ThreadPoolExecutor(max_workers=len(self.target_languages)) as exe:
-                futures = [exe.submit(one, t) for t in self.target_languages]
+            # Persistent fan-out pool (created in start()). A fresh
+            # ThreadPoolExecutor per utterance paid thread-spawn cost on
+            # every sentence of the event.
+            pool = self._translation_pool
+            if pool is None:
+                # stop() ran mid-utterance: finish sequentially.
+                for t in self.target_languages:
+                    tgt, txt = one(t)
+                    if txt:
+                        out[tgt] = txt
+            else:
+                futures = [pool.submit(one, t) for t in self.target_languages]
                 for fut in as_completed(futures):
                     tgt, txt = fut.result()
                     if txt:

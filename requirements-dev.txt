@@ -1,0 +1,6 @@
+# Development / CI tooling. ruff is pinned to the SAME version as
+# .pre-commit-config.yaml (rev: v0.6.9) so local pre-commit and CI lint
+# can never disagree. CI installs this file instead of `pip install ruff`.
+ruff==0.6.9
+pytest==9.1.1
+pytest-qt==4.5.0

@@ -1,6 +1,6 @@
 """Configuration management for CaptionBand.
 
-Stores user settings in %LOCALAPPDATA%\\CaptionBand\\config.json on Windows.
+Stores user settings in %LOCALAPPDATA%\CaptionBand\config.json on Windows.
 Provides a dataclass for type-safe access and a loader/saver pair.
 """
 from __future__ import annotations
@@ -9,7 +9,7 @@ import datetime
 import json
 import logging
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import MISSING, asdict, dataclass, field
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -185,6 +185,8 @@ class AppConfig:
             return bool(self.openai_api_key and self.cerebras_api_key)
         if self.provider == "openrouter":
             return bool(self.openrouter_api_key)
+        if self.provider == "openai_realtime":
+            return bool(self.openai_api_key)
         return False
 
 
@@ -264,6 +266,85 @@ SECRET_FIELDS = (
 )
 
 
+class _Invalid:
+    """Sentinel for a config value that cannot be coerced to its field type."""
+
+
+_INVALID = _Invalid()
+
+
+def _default_of(f) -> object:
+    if f.default is not MISSING:
+        return f.default
+    if f.default_factory is not MISSING:  # type: ignore[attr-defined]
+        return f.default_factory()  # type: ignore[misc]
+    return None
+
+
+def _coerce_value(value: object, default: object) -> object:
+    """Best-effort coercion of one JSON value to the type of its default.
+
+    Returns _INVALID when the value is unusable, so the caller falls back to
+    the field's default. The point: a config.json edited by hand (or written
+    by an older/newer build) with `"width_ratio": "0.8"` must not abort the
+    whole load — and must not reach the overlay as a string either.
+    """
+    if value is None:
+        # None is only meaningful for optional fields (default None).
+        return None if default is None else _INVALID
+    if isinstance(default, bool):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.strip().lower() in ("true", "false", "1", "0"):
+            return value.strip().lower() in ("true", "1")
+        if isinstance(value, (int, float)):
+            return bool(value)
+        return _INVALID
+    if isinstance(default, float):
+        try:
+            return float(value)  # accepts "0.8", 1, 0.8
+        except (TypeError, ValueError):
+            return _INVALID
+    if isinstance(default, int):
+        if isinstance(value, bool):
+            return _INVALID
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return _INVALID
+    if isinstance(default, str):
+        return value if isinstance(value, str) else _INVALID
+    if isinstance(default, list):
+        # A bare string here would explode the providers downstream ("pt-BR"
+        # iterated as characters); only real sequences are accepted.
+        return list(value) if isinstance(value, (list, tuple)) else _INVALID
+    if default is None:
+        # Optional field (e.g. device_name: str | None). Accept scalars.
+        return value if isinstance(value, (str, int, float, bool)) else _INVALID
+    return value
+
+
+def _coerce_fields(model, raw: dict) -> dict:
+    """Filter raw JSON down to the dataclass's fields, coercing per field.
+
+    One rotten field falls back to its default (with a warning) instead of
+    aborting the load of every other setting — the previous `Model(**raw)`
+    raised TypeError on the first bad value and the app booted on factory
+    defaults with nothing recovered.
+    """
+    out: dict = {}
+    for name, f in model.__dataclass_fields__.items():
+        if name not in raw:
+            continue
+        value = _coerce_value(raw[name], _default_of(f))
+        if value is _INVALID:
+            log.warning("config field %r has an unusable value %r; "
+                        "falling back to the default", name, raw[name])
+            continue
+        out[name] = value
+    return out
+
+
 def load_config() -> AppConfig:
     """Load AppConfig from disk, hydrating secret fields from the OS keyring.
 
@@ -275,7 +356,17 @@ def load_config() -> AppConfig:
         return _hydrate_secrets(AppConfig())
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
+        # Valid JSON that is not an object ([...], "abc", 42) used to raise
+        # AttributeError on raw.pop() OUTSIDE this try and kill the boot.
+        if not isinstance(raw, dict):
+            raise ValueError(f"config root is {type(raw).__name__}, not an object")
+        audio_raw = raw.pop("audio", {}) or {}
+        if not isinstance(audio_raw, dict):
+            raise ValueError(f'"audio" is {type(audio_raw).__name__}, not an object')
+        overlay_raw = raw.pop("overlay", {}) or {}
+        if not isinstance(overlay_raw, dict):
+            raise ValueError(f'"overlay" is {type(overlay_raw).__name__}, not an object')
+    except (json.JSONDecodeError, OSError, ValueError) as exc:
         # Do NOT silently hand back defaults. A truncated config.json reset
         # every setting of the event — languages, layout, screen, fonts — with
         # no message anywhere, and the operator would only find out by looking
@@ -291,12 +382,10 @@ def load_config() -> AppConfig:
             log.exception("could not set the unreadable config aside")
         return _hydrate_secrets(AppConfig())
 
-    audio_raw = raw.pop("audio", {}) or {}
-    overlay_raw = raw.pop("overlay", {}) or {}
     cfg = AppConfig(
-        **{k: v for k, v in raw.items() if k in AppConfig.__dataclass_fields__ and k not in ("audio", "overlay")},
-        audio=AudioConfig(**{k: v for k, v in audio_raw.items() if k in AudioConfig.__dataclass_fields__}),
-        overlay=OverlayConfig(**{k: v for k, v in overlay_raw.items() if k in OverlayConfig.__dataclass_fields__}),
+        **_coerce_fields(AppConfig, raw),
+        audio=AudioConfig(**_coerce_fields(AudioConfig, audio_raw)),
+        overlay=OverlayConfig(**_coerce_fields(OverlayConfig, overlay_raw)),
     )
     return _hydrate_secrets(cfg)
 
@@ -338,8 +427,17 @@ def save_config(cfg: AppConfig) -> None:
         if is_available():
             for field in SECRET_FIELDS:
                 value = payload.get(field) or ""
-                set_secret(field, value)
-                payload[field] = ""
+                if set_secret(field, value):
+                    payload[field] = ""
+                else:
+                    # Blanking the field here used to erase the key from the
+                    # JSON even when the keyring write had FAILED — the
+                    # credential vanished from BOTH stores. Keep it in the
+                    # JSON (the pre-keyring behaviour) and say so loudly.
+                    log.critical(
+                        "keyring write FAILED for %s; keeping the value in %s "
+                        "(PLAIN TEXT) so the key is not lost from both stores",
+                        field, path)
         else:
             # No keyring: the blanking loop above never runs, so every API key
             # goes to disk in the clear. That used to happen silently.

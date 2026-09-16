@@ -2,12 +2,13 @@
 # Build with: pyinstaller translator.spec --noconfirm
 
 # pylint: disable=undefined-variable
-import os
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 block_cipher = None
-project_dir = Path(os.getcwd())
+# SPECPATH is injected by PyInstaller itself and is the directory containing
+# this spec — os.getcwd() breaks when pyinstaller is invoked from elsewhere.
+project_dir = Path(SPECPATH)
 
 speech_datas, speech_binaries, speech_hidden = collect_all('azure.cognitiveservices.speech')
 sd_datas, sd_binaries, sd_hidden = collect_all('sounddevice')
@@ -47,17 +48,9 @@ a = Analysis(
         'PyQt6.QtCore',
         'PyQt6.QtGui',
         'PyQt6.QtWidgets',
-        'providers',
-        'providers.azure',
-        'providers.groq',
-        'providers.google',
-        'providers.whisper_local',
-        'providers.cerebras',
-        'providers.openai_cerebras',
-        'providers.openrouter',
-        'providers.openai_realtime',
-        'providers.base',
-        'providers._audio_buffer',
+        # Every providers.* submodule, discovered automatically — a new
+        # provider no longer needs to be remembered here by hand.
+        *collect_submodules('providers'),
         'transcript',
         'secrets_store',
         'constants',
