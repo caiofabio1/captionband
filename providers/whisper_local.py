@@ -6,7 +6,7 @@ Pipeline:
                               → emit TranslationEvent
 
 100% offline after model download. Models live at:
-  %LOCALAPPDATA%\\CaptionBand\\models\\
+  %LOCALAPPDATA%\CaptionBand\models\
   - faster-whisper: cached by Hugging Face transformers (Systran/faster-whisper-*)
   - argos-translate: ~/.local/share/argos-translate/packages/
 
@@ -55,6 +55,16 @@ class WhisperLocalProvider(TranslationProvider):
         label="Whisper local (offline)",
     )
 
+    # Backpressure cap: chunks QUEUED (submitted, not yet started) before we
+    # drop the oldest. CPU transcription takes 3–6 s per chunk against chunks
+    # arriving every ~2 s, so an unbounded executor queue becomes a latency
+    # accumulator: every caption arrives, just later and later — and ~230 MB
+    # of PCM piles up over a 2 h event. A caption 30 s late is worse than a
+    # dropped one.
+    MAX_PENDING_CHUNKS = 4          # 2 workers × 2
+    # Throttle for the DEGRADED warning so a slow stretch does not spam it.
+    BACKPRESSURE_WARN_INTERVAL_S = 30.0
+
     def __init__(
         self,
         whisper_model: str,
@@ -78,6 +88,11 @@ class WhisperLocalProvider(TranslationProvider):
         self._model = None
         self._executor: ThreadPoolExecutor | None = None
         self._buffer: ChunkedAudioBuffer | None = None
+        # (seq, future) of submitted chunks not known to be finished —
+        # backlog accounting for the drop-oldest cap above.
+        self._pending: list = []
+        self._pending_lock = threading.Lock()
+        self._last_backpressure_warning = 0.0
         self._lock = threading.Lock()
         self._running = False
         self._argos_loaded: dict[tuple[str, str], object] = {}
@@ -149,6 +164,9 @@ class WhisperLocalProvider(TranslationProvider):
                 max_chunk_s=max(self.chunk_seconds * 2, 8.0),
             )
             self._sequence = 0
+            with self._pending_lock:
+                self._pending = []
+            self._last_backpressure_warning = 0.0
             self._running = True
             log.info("whisper-local provider started")
 
@@ -164,6 +182,8 @@ class WhisperLocalProvider(TranslationProvider):
             if self._executor is not None:
                 self._executor.shutdown(wait=False, cancel_futures=True)
                 self._executor = None
+            with self._pending_lock:
+                self._pending = []
             self._buffer = None
             self._model = None
             self._running = False
@@ -188,7 +208,45 @@ class WhisperLocalProvider(TranslationProvider):
         seq = self._sequence
         self._sequence += 1
         emitted_at_ms = time.monotonic() * 1000
-        self._executor.submit(self._process_chunk, seq, pcm, emitted_at_ms)
+        fut = self._executor.submit(self._process_chunk, seq, pcm, emitted_at_ms)
+        self._enforce_backlog_cap(seq, fut)
+
+    def _enforce_backlog_cap(self, seq: int, fut) -> None:
+        """Drop the OLDEST queued chunk when the backlog passes the cap.
+
+        Only queued (not-yet-started) chunks are droppable; one already
+        running leaves the accounting and releases its own seq when it
+        finishes. A dropped chunk MUST release its reorder-gate slot, or
+        every later caption waits on a chunk that will never arrive.
+        """
+        dropped: list[int] = []
+        with self._pending_lock:
+            self._pending = [(s, f) for s, f in self._pending if not f.done()]
+            self._pending.append((seq, fut))
+            while len(self._pending) > self.MAX_PENDING_CHUNKS:
+                old_seq, old_fut = self._pending.pop(0)
+                if old_fut.cancel():
+                    dropped.append(old_seq)
+        for old_seq in dropped:
+            log.warning(
+                "whisper-local backlog: dropping queued chunk seq=%s "
+                "(transcription is slower than speech)", old_seq)
+            self._release_empty(old_seq)
+        if dropped:
+            self._report_backpressure()
+
+    def _report_backpressure(self) -> None:
+        """Tell the operator chunks are being dropped — throttled."""
+        now = time.monotonic()
+        if now - self._last_backpressure_warning < self.BACKPRESSURE_WARN_INTERVAL_S:
+            return
+        self._last_backpressure_warning = now
+        self.emit_status(
+            STATUS_DEGRADED,
+            CODE_UNKNOWN,
+            "Processando mais devagar que a fala — descartando chunks para a "
+            "legenda não atrasar.",
+        )
 
     def _process_chunk(self, seq: int, pcm: bytes, emitted_at_ms: float) -> None:
         """Every exit path must release `seq`, or the reorder gate holds all
