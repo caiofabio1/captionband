@@ -36,7 +36,23 @@ jobs:
         run: ruff check .
 
       - name: Test
-        run: pytest -q
+        shell: bash
+        # On failure, mirror the tail of the pytest output into the job
+        # summary ($GITHUB_STEP_SUMMARY shows up in the check-run's
+        # output.summary, readable from the API without auth) — otherwise
+        # a red "exit code 1" on a headless runner is undebuggable.
+        run: |
+          set -o pipefail
+          if pytest -q 2>&1 | tee pytest.log; then
+            exit 0
+          fi
+          {
+            echo "### pytest output (tail)"
+            echo '```'
+            tail -n 150 pytest.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
 
   build:
     # Publish the packaged app folder on every merge to main, so the operator
