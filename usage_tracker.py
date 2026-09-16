@@ -17,11 +17,9 @@ from __future__ import annotations
 import json
 import logging
 import threading
-import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from config import app_data_dir
 
@@ -63,15 +61,15 @@ class _Tracker:
             return
         with self._lock:
             data = self._load()
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            today = datetime.now(UTC).strftime("%Y-%m-%d")
             day = data.setdefault(today, {})
             day[provider] = day.get(provider, 0.0) + seconds
             self._save(data)
 
-    def hours_for_month(self, provider: str, year_month: Optional[str] = None) -> float:
+    def hours_for_month(self, provider: str, year_month: str | None = None) -> float:
         with self._lock:
             data = self._load()
-        ym = year_month or datetime.now(timezone.utc).strftime("%Y-%m")
+        ym = year_month or datetime.now(UTC).strftime("%Y-%m")
         total = 0.0
         for day, providers in data.items():
             if day.startswith(ym):
@@ -81,7 +79,7 @@ class _Tracker:
     def all_providers_summary(self) -> dict[str, dict]:
         """Return a dict per provider with hours, cost estimate, free remaining."""
         out: dict[str, dict] = {}
-        ym = datetime.now(timezone.utc).strftime("%Y-%m")
+        ym = datetime.now(UTC).strftime("%Y-%m")
         for prov in RATES_USD_PER_HOUR:
             hours = self.hours_for_month(prov, year_month=ym)
             free_limit = FREE_TIER_HOURS_MONTH.get(prov, 0.0)
@@ -99,7 +97,7 @@ class _Tracker:
     def prune_older_than_days(self, days: int = 90) -> None:
         with self._lock:
             data = self._load()
-        cutoff = datetime.now(timezone.utc).date()
+        cutoff = datetime.now(UTC).date()
         keep: dict[str, dict] = {}
         for day_str, providers in data.items():
             try:

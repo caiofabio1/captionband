@@ -39,7 +39,13 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["E", "F", "B"]  # tests can be looser
+# tests can be looser: fakes use mutable class defaults on purpose, and
+# unpacking some values just to assert on others is idiomatic there.
+"tests/*" = ["E", "F", "B", "RUF012", "RUF059"]
+# translator.py must run CoInitializeEx(STA) BEFORE any import that transitively
+# pulls soundcard (see the block-comment at the top of the file), so every
+# import below _init_sta() is deliberately not at the top.
+"translator.py" = ["E402"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

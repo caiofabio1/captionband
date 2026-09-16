@@ -20,9 +20,8 @@ try:
 except ImportError:
     OpenAI = None  # type: ignore[assignment,misc]
 
+from .base import OnTranslationCallback, ProviderCapabilities
 from .cerebras import CerebrasProvider
-from .base import ProviderCapabilities, OnTranslationCallback
-
 
 log = logging.getLogger(__name__)
 

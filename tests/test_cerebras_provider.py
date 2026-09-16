@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from providers.cerebras import CerebrasProvider, CEREBRAS_BASE_URL
+from providers.cerebras import CEREBRAS_BASE_URL, CerebrasProvider
 
 
 def _make_provider():

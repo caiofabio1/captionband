@@ -13,11 +13,11 @@ Saves to %LOCALAPPDATA%\\CaptionBand\\config.json on Apply.
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, replace
-from typing import Optional
+from dataclasses import replace
+from datetime import UTC
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QGuiApplication
+from PyQt6.QtGui import QColor, QGuiApplication
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -47,9 +47,6 @@ from PyQt6.QtWidgets import (
 )
 
 from config import (
-    AppConfig,
-    AudioConfig,
-    OverlayConfig,
     DISPLAY_MODES,
     GROQ_TRANSCRIPTION_MODELS,
     GROQ_TRANSLATION_MODELS,
@@ -59,12 +56,12 @@ from config import (
     WHISPER_COMPUTE_TYPES,
     WHISPER_DEVICE_OPTIONS,
     WHISPER_MODEL_OPTIONS,
+    AppConfig,
     config_path,
     log_path,
     save_config,
 )
-from providers import PROVIDER_LABELS  # noqa: F401  used in About tab
-
+from providers import PROVIDER_LABELS
 
 log = logging.getLogger(__name__)
 
@@ -114,7 +111,7 @@ PROVIDER_HINTS = {
 class ColorButton(QPushButton):
     color_changed = pyqtSignal(str)
 
-    def __init__(self, color_hex: str, parent: Optional[QWidget] = None):
+    def __init__(self, color_hex: str, parent: QWidget | None = None):
         super().__init__(parent)
         self.color_hex = color_hex
         self._update_swatch()
@@ -167,7 +164,7 @@ class SettingsWindow(QDialog):
     # delivery onto the GUI thread where the QProgressBar lives.
     _capture_level = pyqtSignal(int)
 
-    def __init__(self, config: AppConfig, parent: Optional[QWidget] = None):
+    def __init__(self, config: AppConfig, parent: QWidget | None = None):
         super().__init__(parent)
         self.setWindowTitle("CaptionBand — Configurações")
         # Smaller min height so the dialog fits on laptops/half-screen layouts;
@@ -827,10 +824,10 @@ class SettingsWindow(QDialog):
         total_h = per_min * 60 * n
         label.setText(
             "⚠ Este provedor abre <b>uma sessão por idioma de destino</b>.<br>"
-            "Com <b>{n} idioma(s)</b> selecionado(s): {n} × US$ {pm:.3f}/min "
-            "≈ <b>US$ {th:.2f} por hora</b> de evento.<br>"
+            f"Com <b>{n} idioma(s)</b> selecionado(s): {n} × US$ {per_min:.3f}/min "
+            f"≈ <b>US$ {total_h:.2f} por hora</b> de evento.<br>"
             "<span style='color:#666'>Azure faz multi-idioma numa sessão só e "
-            "tem 5 h/mês grátis (F0).</span>".format(n=n, pm=per_min, th=total_h)
+            "tem 5 h/mês grátis (F0).</span>"
         )
 
     def _build_openrouter_form(self) -> QWidget:
@@ -968,7 +965,8 @@ class SettingsWindow(QDialog):
         return w
 
     def _on_test_capture(self) -> None:
-        from PyQt6.QtCore import QThread, QTimer as _QTimer
+        from PyQt6.QtCore import QTimer as _QTimer
+
         from audio_capture import AudioCapture, find_device
 
         # The button was never disabled, so a second click replaced
@@ -1198,7 +1196,7 @@ class SettingsWindow(QDialog):
         for i, s in enumerate(QGuiApplication.screens()):
             geo = s.geometry()
             self.screen_combo.addItem(
-                "{}: {} ({}×{})".format(i + 1, s.name(), geo.width(), geo.height()), s.name())
+                f"{i + 1}: {s.name()} ({geo.width()}×{geo.height()})", s.name())
         self.screen_combo.setToolTip(
             "Em modo 'estender', o projetor é a 2ª tela. Atalho: bandeja → 'Tela da legenda'.")
         pl.addRow("Tela da legenda:", self.screen_combo)
@@ -1238,10 +1236,11 @@ class SettingsWindow(QDialog):
         usage_group = QGroupBox("Uso este mês (estimativa local)")
         usage_layout = QVBoxLayout(usage_group)
         try:
+            from datetime import datetime
+
             import usage_tracker
-            from datetime import datetime, timezone
             summary = usage_tracker.summary()
-            ym = datetime.now(timezone.utc).strftime("%Y-%m")
+            ym = datetime.now(UTC).strftime("%Y-%m")
             usage_layout.addWidget(QLabel(f"<small>Período: {ym} (UTC)</small>"))
             html_lines = ["<table cellspacing='6' cellpadding='2'>"]
             html_lines.append(
@@ -1273,8 +1272,8 @@ class SettingsWindow(QDialog):
         layout.addWidget(QLabel(f"<b>Config:</b> <code>{config_path()}</code>"))
         layout.addWidget(QLabel(f"<b>Logs:</b> <code>{log_path()}</code>"))
         layout.addWidget(QLabel(
-            f"<small>GitHub: <a href='https://github.com/caiofabio1/captionband'>"
-            f"caiofabio1/captionband</a></small>"
+            "<small>GitHub: <a href='https://github.com/caiofabio1/captionband'>"
+            "caiofabio1/captionband</a></small>"
         ))
         layout.addStretch(1)
         return w
@@ -1405,7 +1404,7 @@ class SettingsWindow(QDialog):
         idx = self.screen_combo.findData(ov.screen_name or "")
         if idx < 0 and ov.screen_name:
             # Configured monitor not plugged in right now: keep the choice.
-            self.screen_combo.addItem("{} (não conectada agora)".format(ov.screen_name), ov.screen_name)
+            self.screen_combo.addItem(f"{ov.screen_name} (não conectada agora)", ov.screen_name)
             idx = self.screen_combo.count() - 1
         self.screen_combo.setCurrentIndex(max(0, idx))
         self.stable_height_check.setChecked(bool(ov.stable_height))
@@ -1521,9 +1520,9 @@ class SettingsWindow(QDialog):
         record "app quit normally". Do not chase it as a crash.
         """
         try:
-            from overlay_qt import CaptionOverlay
             from PyQt6.QtCore import QTimer
 
+            from overlay_qt import CaptionOverlay
             from translator import split_overlay_configs
 
             cfg = self._build_config()
@@ -1630,6 +1629,7 @@ class SettingsWindow(QDialog):
 
 def _demo() -> None:  # pragma: no cover
     import sys
+
     from config import load_config
 
     app = QApplication(sys.argv)

@@ -47,7 +47,7 @@ class FakeProvider(TranslationProvider):
     CAPABILITIES = ProviderCapabilities(
         ordered_by_protocol=False, translates=True, streaming=False, label="fake",
     )
-    instances: list["FakeProvider"] = []
+    instances: list[FakeProvider] = []
 
     def __init__(self, on_event, on_status):
         self.on_event = on_event
@@ -70,7 +70,7 @@ class FakeProvider(TranslationProvider):
 
 
 class FakeCapture:
-    instances: list["FakeCapture"] = []
+    instances: list[FakeCapture] = []
     # How many of the NEXT constructions die on start() (device not found).
     fail_next = 0
 
@@ -263,7 +263,8 @@ class TestSourceModeIsNonBlocking:
                               azure_streaming_mode=False)
 
     def test_returns_immediately_and_finishes_on_a_worker(self, ctrl, qapp, monkeypatch):
-        import threading, time as _t
+        import threading
+        import time as _t
         self._azure(ctrl)
         ctrl.start()
         old = FakeProvider.instances[-1]

@@ -20,13 +20,14 @@ speakers are producing, including your music.
 from __future__ import annotations
 
 import argparse
+import itertools
 import os
 import sys
 import tempfile
 import time
 import wave
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from typing import Callable, Optional
 
 import numpy as np
 
@@ -61,7 +62,7 @@ PHRASES = {
 def synthesize(key: str, region: str, phrase_id: str) -> str:
     """Synthesize one phrase to a cached WAV. Returns the path."""
     os.makedirs(AUDIO_CACHE, exist_ok=True)
-    path = os.path.join(AUDIO_CACHE, "{}.wav".format(phrase_id))
+    path = os.path.join(AUDIO_CACHE, f"{phrase_id}.wav")
     if os.path.exists(path) and os.path.getsize(path) > 1000:
         return path
 
@@ -77,7 +78,7 @@ def synthesize(key: str, region: str, phrase_id: str) -> str:
     result = syn.speak_text_async(text).get()
     if result.reason == speechsdk.ResultReason.Canceled:
         d = result.cancellation_details
-        raise RuntimeError("TTS falhou: {} {}".format(d.reason, d.error_details))
+        raise RuntimeError(f"TTS falhou: {d.reason} {d.error_details}")
     return path
 
 
@@ -140,6 +141,7 @@ class Harness:
 
     def __init__(self, cfg):
         from PyQt6.QtWidgets import QApplication
+
         import translator as T
 
         self.app = QApplication.instance() or QApplication([])
@@ -212,7 +214,7 @@ def _speak_and_collect(cfg, phrase_ids: list, tail_s: float = 6.0) -> Run:
     h.start()
     for pid in phrase_ids:
         path = synthesize(cfg.azure_speech_key, cfg.azure_speech_region, pid)
-        dur = play(path)
+        play(path)
         h.pump(0.4)
     h.pump(tail_s)              # wait for the last translation to land
     h.stop()
@@ -229,8 +231,7 @@ def case_1_streaming_pt(cfg) -> Result:
     return Result(
         "1. streaming pt-BR -> es+en",
         ok,
-        "es={!r}\n      en={!r}\n      origem={!r}".format(es[:70], en[:70],
-                                                           run.originals[:70]),
+        f"es={es[:70]!r}\n      en={en[:70]!r}\n      origem={run.originals[:70]!r}",
         {"legendas": len(run.finals), "es": bool(es), "en": bool(en)},
     )
 
@@ -263,7 +264,7 @@ def case_3_ordering(cfg) -> Result:
     # protocol's guarantee; the assertion is here to catch a regression that
     # breaks it (e.g. wrongly routing it through the reorder gate).
     times = [c.at for c in run.finals]
-    monotonic = all(b >= a for a, b in zip(times, times[1:]))
+    monotonic = all(b >= a for a, b in itertools.pairwise(times))
     got_all = len(run.finals) >= 2
     ok = monotonic and got_all
     return Result(
@@ -290,13 +291,13 @@ def case_4_bad_key_is_loud(cfg) -> Result:
     except Exception as exc:
         h.stop()
         return Result("4. chave invalida grita (nao emudece)", True,
-                      "falhou no start com erro visivel: {}".format(str(exc)[:80]),
+                      f"falhou no start com erro visivel: {str(exc)[:80]}",
                       {"via": "excecao no start"})
     h.stop()
 
     trouble = [x for x in h.run.health if x[0] in ("failing", "fatal")]
     ok = bool(trouble)
-    detail = ("status reportado: {}".format(trouble[0][2][:70]) if trouble
+    detail = (f"status reportado: {trouble[0][2][:70]}" if trouble
               else "NENHUM status de erro — o app ficou MUDO (a regressao voltou)")
     return Result("4. chave invalida grita (nao emudece)", ok, detail,
                   {"eventos_de_saude": len(h.run.health)})
@@ -330,8 +331,7 @@ def case_5_capture_watchdog(cfg) -> Result:
     return Result(
         "5. captura morre -> reaberta sozinha, operador avisado",
         ok,
-        "viva antes={} | reaberta={} | saude={} | ok de novo={}".format(
-            alive_before, reopened, kinds, healthy_again),
+        f"viva antes={alive_before} | reaberta={reopened} | saude={kinds} | ok de novo={healthy_again}",
         {"reaberta": reopened, "avisou": "failing" in kinds},
     )
 
@@ -439,7 +439,7 @@ def case_7_session_drop_recovers(cfg) -> Result:
     return Result(
         "7. queda de sessao se recupera sozinha",
         ok,
-        "legendas antes={} depois={} | saude={}".format(before, after, kinds),
+        f"legendas antes={before} depois={after} | saude={kinds}",
         {"recuperou": recovered, "avisou": reported},
     )
 
@@ -481,7 +481,7 @@ def main() -> int:
     selected = [(cid, fn) for cid, fn in CASES
                 if not args.case or cid in args.case]
     results = []
-    for cid, fn in selected:
+    for _cid, fn in selected:
         print("[{}/{}] rodando: {}".format(
             len(results) + 1, len(selected), (fn.__doc__ or "").splitlines()[0]))
         t0 = time.monotonic()
@@ -490,7 +490,7 @@ def main() -> int:
         except Exception as exc:
             import traceback
             traceback.print_exc()
-            r = Result(fn.__name__, False, "EXCECAO: {}".format(exc))
+            r = Result(fn.__name__, False, f"EXCECAO: {exc}")
         r.metrics["segundos"] = round(time.monotonic() - t0, 1)
         results.append(r)
         print("      {} {}".format("PASSOU" if r.passed else "FALHOU", r.detail))
@@ -504,9 +504,9 @@ def main() -> int:
     failed = [r for r in results if not r.passed]
     print("=" * 66)
     if failed:
-        print("{} de {} casos FALHARAM.".format(len(failed), len(results)))
+        print(f"{len(failed)} de {len(results)} casos FALHARAM.")
         return 1
-    print("Todos os {} casos passaram contra a API real.".format(len(results)))
+    print(f"Todos os {len(results)} casos passaram contra a API real.")
     return 0
 
 

@@ -33,6 +33,8 @@ from providers.base import (
     TranslationProvider,
 )
 
+from .conftest import requires_azure
+
 REPO = Path(__file__).resolve().parent.parent
 
 # conftest.py has an autouse fixture that replaces config.app_data_dir with a
@@ -40,6 +42,7 @@ REPO = Path(__file__).resolve().parent.parent
 # migration tests below need the GENUINE function; grab it at import time,
 # which runs before any fixture.
 import config as _config_at_import
+
 _REAL_APP_DATA_DIR = _config_at_import.app_data_dir
 
 
@@ -101,9 +104,9 @@ class TestComApartment:
         Returning True there would make the caller CoUninitialize() a COM
         instance it never initialised.
         """
-        from audio_capture import _com_initialize_mta, _com_uninitialize
-
         import ctypes
+
+        from audio_capture import _com_initialize_mta, _com_uninitialize
         # Claim STA on a throwaway thread, then ask for MTA on the same thread.
         result: dict[str, bool] = {}
 
@@ -181,6 +184,7 @@ def _azure(monkeypatch, **kw):
     return p
 
 
+@requires_azure
 class TestAzureStopIsFinal:
     def test_events_after_stop_never_reach_the_controller(self, monkeypatch):
         """The SDK dispatches on its own thread; results outlive stop().
@@ -291,6 +295,7 @@ class TestAzureStopIsFinal:
         assert "old.recognized.disconnect_all()" in worker
 
 
+@requires_azure
 class TestAzureLanguageIdentification:
     """Azure returns one of the candidate languages EVEN IF none was spoken.
 
@@ -358,7 +363,7 @@ class TestAzureLanguageIdentification:
 class _SwapProvider(TranslationProvider):
     CAPABILITIES = ProviderCapabilities(
         ordered_by_protocol=True, translates=True, streaming=True, label="swap")
-    built: list["_SwapProvider"] = []
+    built: list[_SwapProvider] = []
 
     def __init__(self, on_event, on_status):
         self.on_event, self.on_status = on_event, on_status

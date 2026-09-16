@@ -7,6 +7,8 @@ from config import AppConfig
 from providers import ProviderUnavailable, build_provider, provider_capabilities
 from providers.base import TranslationEvent, TranslationProvider
 
+from .conftest import requires_azure
+
 
 def noop_callback(event: TranslationEvent) -> None:
     pass
@@ -21,6 +23,7 @@ class TestBuildProvider:
         with pytest.raises(ProviderUnavailable, match="desconhecido"):
             build_provider(cfg, on_event=noop_callback)
 
+    @requires_azure
     def test_azure_built_with_required_fields(self):
         cfg = AppConfig(
             provider="azure",
@@ -31,6 +34,7 @@ class TestBuildProvider:
         assert isinstance(prov, TranslationProvider)
         assert not prov.is_running
 
+    @requires_azure
     def test_azure_missing_key_raises(self):
         cfg = AppConfig(provider="azure", azure_speech_region="brazilsouth")
         with pytest.raises(ValueError, match="speech_key"):
@@ -57,6 +61,7 @@ class TestBuildProvider:
         with pytest.raises(ValueError, match="at most 4"):
             build_provider(cfg, on_event=noop_callback)
 
+    @requires_azure
     def test_azure_supports_max_10_source_languages(self):
         cfg = AppConfig(
             provider="azure",

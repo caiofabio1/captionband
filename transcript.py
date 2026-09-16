@@ -22,7 +22,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, TextIO
+from typing import TextIO
 
 from config import app_data_dir
 from constants import (
@@ -30,7 +30,6 @@ from constants import (
     TRANSCRIPT_MAX_AGE_DAYS,
     TRANSCRIPT_SRT_CHECKPOINT_EVERY,
 )
-
 
 log = logging.getLogger(__name__)
 
@@ -76,7 +75,7 @@ def _apply_retention(base_dir: Path) -> None:
 class TranscriptEntry:
     start_offset_s: float
     end_offset_s: float
-    detected_language: Optional[str]
+    detected_language: str | None
     original_text: str
     translations: dict[str, str]
 
@@ -85,20 +84,20 @@ class TranscriptWriter:
     def __init__(self, provider_name: str, target_languages: list[str]):
         self.provider_name = provider_name
         self.target_languages = target_languages
-        self.start_time: Optional[float] = None
+        self.start_time: float | None = None
         self._lock = threading.Lock()
-        self._txt_file: Optional[TextIO] = None
-        self._txt_path: Optional[Path] = None
-        self._srt_path: Optional[Path] = None
+        self._txt_file: TextIO | None = None
+        self._txt_path: Path | None = None
+        self._srt_path: Path | None = None
         self._entries: list[TranscriptEntry] = []
         self._last_end_offset: float = 0.0
 
     @property
-    def txt_path(self) -> Optional[Path]:
+    def txt_path(self) -> Path | None:
         return self._txt_path
 
     @property
-    def srt_path(self) -> Optional[Path]:
+    def srt_path(self) -> Path | None:
         return self._srt_path
 
     def start(self) -> None:
@@ -137,7 +136,7 @@ class TranscriptWriter:
         self,
         original_text: str,
         translations: dict[str, str],
-        detected_language: Optional[str],
+        detected_language: str | None,
         is_final: bool,
     ) -> None:
         # Only persist final translations (the events with the actual translation text)
@@ -189,13 +188,13 @@ class TranscriptWriter:
             except Exception:
                 log.exception("failed to write SRT %s", path)
 
-    def srt_path_for(self, lang: str) -> Optional[Path]:
+    def srt_path_for(self, lang: str) -> Path | None:
         if self._srt_path is None:
             return None
         if self.target_languages and lang == self.target_languages[0]:
             return self._srt_path
         return self._srt_path.with_name(
-            "{}.{}.srt".format(self._srt_path.stem, lang))
+            f"{self._srt_path.stem}.{lang}.srt")
 
     def stop(self) -> None:
         with self._lock:
@@ -215,7 +214,7 @@ class TranscriptWriter:
                 log.info("transcript saved: %s + %s", self._txt_path, self._srt_path)
 
     def _write_srt(self, path: Path, entries: list[TranscriptEntry],
-                   target: Optional[str]) -> None:
+                   target: str | None) -> None:
         """Write SubRip format with `target`'s translation as the subtitle
         line (falling back to the original when that translation is missing)."""
         primary_target = target

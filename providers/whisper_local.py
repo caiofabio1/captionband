@@ -21,7 +21,6 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
 
 from ._audio_buffer import ChunkedAudioBuffer
 from .base import (
@@ -32,7 +31,6 @@ from .base import (
     TranslationEvent,
     TranslationProvider,
 )
-
 
 log = logging.getLogger(__name__)
 
@@ -78,8 +76,8 @@ class WhisperLocalProvider(TranslationProvider):
         self.chunk_seconds = chunk_seconds
 
         self._model = None
-        self._executor: Optional[ThreadPoolExecutor] = None
-        self._buffer: Optional[ChunkedAudioBuffer] = None
+        self._executor: ThreadPoolExecutor | None = None
+        self._buffer: ChunkedAudioBuffer | None = None
         self._lock = threading.Lock()
         self._running = False
         self._argos_loaded: dict[tuple[str, str], object] = {}
@@ -108,7 +106,7 @@ class WhisperLocalProvider(TranslationProvider):
     def _ensure_argos(self) -> None:
         try:
             import argostranslate.package as ap
-            import argostranslate.translate as at
+            import argostranslate.translate  # noqa: F401  (availability probe)
         except ImportError:
             log.warning("argostranslate not available — translation disabled")
             return
@@ -203,7 +201,7 @@ class WhisperLocalProvider(TranslationProvider):
                 self._release_empty(seq)
                 return
 
-            language_hint: Optional[str] = None
+            language_hint: str | None = None
             if len(self.source_languages) == 1:
                 language_hint = self.source_languages[0].split("-")[0]
 
@@ -270,7 +268,7 @@ class WhisperLocalProvider(TranslationProvider):
         except Exception:
             log.exception("failed to release empty seq=%s", seq)
 
-    def _translate_argos(self, text: str, src: Optional[str], tgt: str) -> Optional[str]:
+    def _translate_argos(self, text: str, src: str | None, tgt: str) -> str | None:
         try:
             import argostranslate.translate as at
         except ImportError:

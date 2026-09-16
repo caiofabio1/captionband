@@ -24,11 +24,9 @@ from __future__ import annotations
 
 import base64
 import logging
-from typing import Optional
 
+from .base import OnTranslationCallback, ProviderCapabilities
 from .groq import GroqProvider
-from .base import ProviderCapabilities, OnTranslationCallback
-
 
 log = logging.getLogger(__name__)
 
@@ -116,7 +114,7 @@ class OpenRouterProvider(GroqProvider):
         return self.openrouter_translation_model
 
     # ----------------------------------------------------------- STT override
-    def _call_transcription(self, wav_bytes: bytes) -> Optional[tuple[str, Optional[str]]]:
+    def _call_transcription(self, wav_bytes: bytes) -> tuple[str, str | None] | None:
         """Override parent's multipart upload.
 
         OpenRouter's audio is messy:
@@ -138,7 +136,7 @@ class OpenRouterProvider(GroqProvider):
             return self._stt_via_audio_endpoint(wav_bytes)
         return self._stt_via_chat_audio(wav_bytes)
 
-    def _stt_via_audio_endpoint(self, wav_bytes: bytes) -> Optional[tuple[str, Optional[str]]]:
+    def _stt_via_audio_endpoint(self, wav_bytes: bytes) -> tuple[str, str | None] | None:
         """Hit /audio/transcriptions directly with JSON body containing base64."""
         try:
             import requests
@@ -176,7 +174,7 @@ class OpenRouterProvider(GroqProvider):
             log.error("openrouter /audio/transcriptions error: %s", exc)
             return None
 
-    def _fallback_source_lang(self) -> Optional[str]:
+    def _fallback_source_lang(self) -> str | None:
         """When the API doesn't return a detected language (OpenRouter often
         omits it), fall back to the first configured source language so the
         overlay can color-tint the caption correctly. Returns just the
@@ -186,7 +184,7 @@ class OpenRouterProvider(GroqProvider):
             return first.split("-")[0].lower() if first else None
         return None
 
-    def _stt_via_chat_audio(self, wav_bytes: bytes) -> Optional[tuple[str, Optional[str]]]:
+    def _stt_via_chat_audio(self, wav_bytes: bytes) -> tuple[str, str | None] | None:
         """Use /chat/completions with input_audio for multimodal chat models."""
         try:
             b64 = base64.b64encode(wav_bytes).decode("ascii")

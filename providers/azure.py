@@ -30,7 +30,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Optional
 
 import azure.cognitiveservices.speech as speechsdk
 
@@ -39,6 +38,7 @@ from constants import (
     AZURE_SEGMENTATION_SILENCE_MS,
     AZURE_STABLE_PARTIAL_THRESHOLD,
 )
+
 from .base import (
     CODE_NETWORK,
     STATUS_DEGRADED,
@@ -50,7 +50,6 @@ from .base import (
     TranslationProvider,
     classify_exception,
 )
-
 
 log = logging.getLogger(__name__)
 
@@ -107,8 +106,8 @@ class AzureProvider(TranslationProvider):
         self.streaming_mode = streaming_mode
         self.streaming_language = streaming_language
 
-        self._push_stream: Optional[speechsdk.audio.PushAudioInputStream] = None
-        self._recognizer: Optional[speechsdk.translation.TranslationRecognizer] = None
+        self._push_stream: speechsdk.audio.PushAudioInputStream | None = None
+        self._recognizer: speechsdk.translation.TranslationRecognizer | None = None
         self._lock = threading.Lock()
         self._running = False
         # True while stop() is tearing down: suppresses the reconnect that
@@ -249,7 +248,7 @@ class AzureProvider(TranslationProvider):
         except Exception:
             log.exception("error in azure recognizing handler")
 
-    def _detected_language(self, evt) -> Optional[str]:
+    def _detected_language(self, evt) -> str | None:
         """Pinned mode: the pin. LID mode: what the service says (may be
         empty on the first partials of an utterance)."""
         if self.streaming_mode:
@@ -318,8 +317,7 @@ class AzureProvider(TranslationProvider):
         self.emit_status(
             kind,
             code,
-            "Azure encerrou o reconhecimento: {}".format(
-                details[:160] or str(evt.reason)),
+            f"Azure encerrou o reconhecimento: {details[:160] or str(evt.reason)}",
         )
 
     def _on_session_stopped(self, evt) -> None:
@@ -357,7 +355,7 @@ class AzureProvider(TranslationProvider):
                         return
                     self.emit_status(
                         STATUS_FAILING, CODE_NETWORK,
-                        "{} — reconectando em {}s…".format(why, delay),
+                        f"{why} — reconectando em {delay}s…",
                     )
                     time.sleep(delay)
                     if self._stopping or not self._running:

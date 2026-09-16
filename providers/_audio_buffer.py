@@ -61,10 +61,9 @@ from __future__ import annotations
 import logging
 import threading
 from collections import deque
-from typing import Callable, Deque, Optional
+from collections.abc import Callable
 
 import numpy as np
-
 
 log = logging.getLogger(__name__)
 
@@ -100,14 +99,14 @@ class ChunkedAudioBuffer:
         self._tail: bytearray = bytearray()
 
         # Always-on pre-roll: holds the most recent N frames regardless of speech state.
-        self._preroll: Deque[bytes] = deque(maxlen=self.preroll_frames)
+        self._preroll: deque[bytes] = deque(maxlen=self.preroll_frames)
 
         # Active utterance buffer (only filled during speech)
         self._buffer: list[bytes] = []
         self._buffer_samples = 0
 
         # Sliding RMS window for smoothing
-        self._rms_window: Deque[float] = deque(maxlen=smoothing_window)
+        self._rms_window: deque[float] = deque(maxlen=smoothing_window)
 
         # Per-utterance counters
         self._speech_frames = 0

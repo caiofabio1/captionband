@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from providers.openai_cerebras import OpenAICerebrasProvider, OPENAI_BASE_URL
 from providers.cerebras import CEREBRAS_BASE_URL
+from providers.openai_cerebras import OPENAI_BASE_URL, OpenAICerebrasProvider
 
 
 def _make_provider():
