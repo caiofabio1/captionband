@@ -6,7 +6,7 @@ Pipeline:
                               → emit TranslationEvent
 
 100% offline after model download. Models live at:
-  %LOCALAPPDATA%\CaptionBand\models\
+  %LOCALAPPDATA%\\CaptionBand\\models\\
   - faster-whisper: cached by Hugging Face transformers (Systran/faster-whisper-*)
   - argos-translate: ~/.local/share/argos-translate/packages/
 
