@@ -347,6 +347,15 @@ class TestPersistentTranslationPool:
 
 
 class TestStreamResampler:
+    @pytest.fixture(autouse=True)
+    def _needs_scipy(self):
+        # scipy is DELIBERATELY not in requirements-build.txt (saves ~80 MB
+        # in the installer; the np.interp fallback ships instead). These
+        # tests assert the polyphase behaviour, so they only make sense where
+        # scipy is installed — same "skip when the SDK is absent" convention
+        # as requires_azure.
+        pytest.importorskip("scipy")
+
     def test_block_stream_matches_one_shot(self):
         """The whole point of the carry buffer: streaming 50 ms blocks through
         the stateful resampler must produce (nearly) the same signal as a

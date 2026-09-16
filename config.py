@@ -1,6 +1,6 @@
 """Configuration management for CaptionBand.
 
-Stores user settings in %LOCALAPPDATA%\CaptionBand\config.json on Windows.
+Stores user settings in %LOCALAPPDATA%\\CaptionBand\\config.json on Windows.
 Provides a dataclass for type-safe access and a loader/saver pair.
 """
 from __future__ import annotations
