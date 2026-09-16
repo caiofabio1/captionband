@@ -189,6 +189,10 @@ class SettingsWindow(QDialog):
 
     def showEvent(self, event):  # type: ignore[override]
         super().showEvent(event)
+        # Monitors may have been (un)plugged since the dialog was built —
+        # the projector typically arrives AFTER the app is already open.
+        if hasattr(self, "screen_combo"):
+            self._populate_screens()
         self.raise_()
         self.activateWindow()
 
@@ -1192,11 +1196,7 @@ class SettingsWindow(QDialog):
                 self.layout_combo.currentData() == "split"))
 
         self.screen_combo = QComboBox()
-        self.screen_combo.addItem("Tela principal", "")
-        for i, s in enumerate(QGuiApplication.screens()):
-            geo = s.geometry()
-            self.screen_combo.addItem(
-                f"{i + 1}: {s.name()} ({geo.width()}×{geo.height()})", s.name())
+        self._populate_screens()
         self.screen_combo.setToolTip(
             "Em modo 'estender', o projetor é a 2ª tela. Atalho: bandeja → 'Tela da legenda'.")
         pl.addRow("Tela da legenda:", self.screen_combo)
@@ -1221,6 +1221,37 @@ class SettingsWindow(QDialog):
         outer.addStretch(1)
 
         return w
+
+    def _populate_screens(self) -> None:
+        """Fill the screen combo from the monitors connected RIGHT NOW.
+
+        Used to run once at dialog build: a projector plugged in after the
+        dialog was opened never appeared in the list (and one unplugged stayed
+        there as a ghost). Called again from showEvent so reopening the dialog
+        always shows the current layout. The current selection is preserved —
+        including a configured monitor that is momentarily disconnected, which
+        is kept as an explicit entry instead of being silently dropped.
+        """
+        current = self.screen_combo.currentData()
+        if current is None:
+            current = self.config.overlay.screen_name or ""
+        self.screen_combo.blockSignals(True)
+        try:
+            self.screen_combo.clear()
+            self.screen_combo.addItem("Tela principal", "")
+            for i, s in enumerate(QGuiApplication.screens()):
+                geo = s.geometry()
+                self.screen_combo.addItem(
+                    f"{i + 1}: {s.name()} ({geo.width()}×{geo.height()})", s.name())
+            idx = self.screen_combo.findData(current or "")
+            if idx < 0 and current:
+                # Configured monitor not plugged in right now: keep the choice.
+                self.screen_combo.addItem(
+                    f"{current} (não conectada agora)", current)
+                idx = self.screen_combo.count() - 1
+            self.screen_combo.setCurrentIndex(max(0, idx))
+        finally:
+            self.screen_combo.blockSignals(False)
 
     def _build_about_tab(self) -> QWidget:
         from constants import APP_VERSION
