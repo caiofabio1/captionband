@@ -276,12 +276,12 @@ python translator.py --settings
                                               ┌──────────┴───────────┐
                                               │  settings_window     │
                                               │  PyQt6 dialog        │
-                                              └──────────┴───────────┘
+                                              └──────────────────────┘
                                                          ▲
                                               ┌──────────┴───────────┐
                                               │  translator.py       │
                                               │  tray + orchestrator │
-                                              └──────────┴───────────┘
+                                              └──────────────────────┘
 ```
 
 ## Arquivos
