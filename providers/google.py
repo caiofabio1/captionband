@@ -10,10 +10,15 @@ Concurrency design:
 - Recognition thread reads STT responses and immediately emits an event with
   ONLY the original transcript (no translations yet). This gets to the overlay
   in <100ms after Google emits.
-- Translation pool runs translations in parallel. When done, emits another
-  event with translations filled in. Overlay merges by sequence id.
+- At each STT final the utterance gets a monotonically increasing `seq` and
+  the translation is submitted to a thread pool (NON-blocking). Translations
+  CAN complete out of order — a short utterance B submitted after A finishes
+  first — so the final event carries that `seq` and this provider declares
+  ordered_by_protocol=False: the controller's reorder gate publishes the
+  finals in utterance order.
 - This avoids the previous serialization where 3 STT results in a row would
-  wait for 3 sequential translation API calls.
+  wait for 3 sequential translation API calls, WITHOUT pretending the
+  translation fan-out preserves order (it does not — see the seq above).
 
 Note: Google Speech v2 supports up to 4 source languages (1 main +
 3 alternatives). For 5+ languages prefer Azure.
@@ -41,11 +46,13 @@ log = logging.getLogger(__name__)
 
 class GoogleProvider(TranslationProvider):
     # Recognition runs over one bidirectional StreamingRecognize call, so
-    # recognition results arrive in order. (The per-utterance translation
-    # fan-out is parallel, but it happens AFTER the ordered recognition
-    # result and never reorders utterances relative to each other.)
+    # recognition results arrive in order — but the per-utterance translation
+    # fan-out is PARALLEL, and the final (translated) event is emitted when
+    # the translation finishes, not when the utterance was recognized. Two
+    # utterances A→B routinely complete B before A, so finals need the
+    # controller's reorder gate, fed by the seq assigned at STT-final time.
     CAPABILITIES = ProviderCapabilities(
-        ordered_by_protocol=True,
+        ordered_by_protocol=False,
         translates=True,
         streaming=True,
         label="Google Speech v2 + Translate",
@@ -84,12 +91,34 @@ class GoogleProvider(TranslationProvider):
         self._lock = threading.Lock()
         self._running = False
         self._creds_temp_path: str | None = None
+        # Save/restore for the process-wide GOOGLE_APPLICATION_CREDENTIALS we
+        # overwrite in _setup_credentials (see stop()).
+        self._creds_env_prev: str | None = None
+        self._creds_env_set = False
         self._speech_client = None
         self._translate_client = None
+        # Monotonic utterance index, assigned at STT-final time and carried
+        # by the final (translated) event so the controller's reorder gate
+        # can undo the translation pool's completion order. Only the
+        # recognition thread touches it.
+        self._sequence = 0
+
+    def _set_credentials_env(self, value: str) -> None:
+        """Point GOOGLE_APPLICATION_CREDENTIALS at our credentials, remembering
+        what was there before.
+
+        The variable is PROCESS-wide: leaving it overwritten (or pointing at
+        a temp file we delete in stop()) breaks every other Google client in
+        this process after we stop.
+        """
+        if not self._creds_env_set:
+            self._creds_env_prev = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+            self._creds_env_set = True
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = value
 
     def _setup_credentials(self) -> None:
         if os.path.isfile(self.credentials_json):
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = self.credentials_json
+            self._set_credentials_env(self.credentials_json)
             return
         try:
             json.loads(self.credentials_json)
@@ -98,7 +127,7 @@ class GoogleProvider(TranslationProvider):
         fd, path = tempfile.mkstemp(suffix=".json", prefix="tlt-google-")
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(self.credentials_json)
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = path
+        self._set_credentials_env(path)
         self._creds_temp_path = path
 
     def start(self) -> None:
@@ -144,6 +173,16 @@ class GoogleProvider(TranslationProvider):
                 except Exception:
                     pass
             self._creds_temp_path = None
+            # Restore the process-wide env var we overwrote at start: with
+            # inline JSON it pointed at the temp file we just deleted, and
+            # with a file path it hid whatever the operator had before.
+            if self._creds_env_set:
+                if self._creds_env_prev is None:
+                    os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+                else:
+                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = self._creds_env_prev
+                self._creds_env_set = False
+                self._creds_env_prev = None
             # drain queue
             try:
                 while True:
@@ -247,12 +286,24 @@ class GoogleProvider(TranslationProvider):
                             ))
                             continue
 
+                        # Sequence at STT-FINAL time, before the translation
+                        # pool gets the utterance: the pool emits in
+                        # COMPLETION order, which is not utterance order.
+                        seq = self._sequence
+                        self._sequence += 1
+
                         if self._is_likely_hallucination(transcript):
                             log.info("google dropping hallucination: %r", transcript[:80])
+                            # The gate holds every later caption hostage to a
+                            # slot that never arrives unless we release it.
+                            self._release_empty(seq, detected)
                             continue
 
-                        log.info("google STT final: lang=%s text=%r", detected, transcript[:80])
-                        # Emit final original (will replace any interim with same text)
+                        log.info("google STT final [seq=%s]: lang=%s text=%r",
+                                 seq, detected, transcript[:80])
+                        # Emit final original (will replace any interim with same text).
+                        # Cosmetic and seq-less on purpose: partials bypass the
+                        # reorder gate so the original shows without gate latency.
                         self.on_event(TranslationEvent(
                             detected_language=detected,
                             original_text=transcript,
@@ -261,7 +312,7 @@ class GoogleProvider(TranslationProvider):
                         ))
                         if self._translation_pool is not None:
                             self._translation_pool.submit(
-                                self._translate_and_emit, transcript, detected
+                                self._translate_and_emit, seq, transcript, detected
                             )
 
                 # Stream ended normally — restart immediately if still running
@@ -296,7 +347,10 @@ class GoogleProvider(TranslationProvider):
         common = {".", "..", "...", "you", "thank you.", "thanks.", "bye."}
         return text.strip().lower() in common
 
-    def _translate_and_emit(self, transcript: str, detected: str | None) -> None:
+    def _translate_and_emit(self, seq: int, transcript: str, detected: str | None) -> None:
+        """Every exit path must emit an event carrying `seq` — a translation
+        that dies silently stalls the controller's reorder gate until its
+        deadline and swallows every caption behind this one."""
         try:
             t0 = time.time()
             translations = self._translate_all(transcript, detected)
@@ -307,11 +361,26 @@ class GoogleProvider(TranslationProvider):
                 original_text=transcript,
                 translations=translations,
                 is_final=True,
+                seq=seq,
             ))
             self.report_ok()
         except Exception as exc:
             log.exception("google translation worker crashed")
             self.report_exception(exc, "translation worker")
+            self._release_empty(seq, detected)
+
+    def _release_empty(self, seq: int, detected: str | None = None) -> None:
+        """Free a reorder-gate slot that produced no translatable text."""
+        try:
+            self.on_event(TranslationEvent(
+                detected_language=detected,
+                original_text="",
+                translations={},
+                is_final=True,
+                seq=seq,
+            ))
+        except Exception:
+            log.exception("failed to release empty seq=%s", seq)
 
     def _translate_all(self, text: str, source_lang: str | None) -> dict[str, str]:
         out: dict[str, str] = {}
@@ -344,10 +413,22 @@ class GoogleProvider(TranslationProvider):
                 out[tgt] = txt
             return out
 
-        with ThreadPoolExecutor(max_workers=len(self.target_languages)) as exe:
-            futures = [exe.submit(one, t) for t in self.target_languages]
-            for fut in as_completed(futures):
-                tgt, txt = fut.result()
+        # Fan out over the provider's PERSISTENT pool. A fresh
+        # ThreadPoolExecutor per utterance paid thread-spawn cost on every
+        # sentence of the event. Sizing note: the pool has
+        # max(2, 2 * len(targets)) workers and _translate_and_emit occupies
+        # one, so the fan-out always fits without starving.
+        pool = self._translation_pool
+        if pool is None:
+            # stop() ran mid-utterance: finish sequentially rather than die.
+            for t in self.target_languages:
+                tgt, txt = one(t)
                 if txt:
                     out[tgt] = txt
+            return out
+        futures = [pool.submit(one, t) for t in self.target_languages]
+        for fut in as_completed(futures):
+            tgt, txt = fut.result()
+            if txt:
+                out[tgt] = txt
         return out

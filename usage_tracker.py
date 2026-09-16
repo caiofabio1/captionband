@@ -3,7 +3,7 @@
 We don't have access to provider billing APIs without each customer
 configuring scopes/permissions, so instead we track usage *locally* —
 seconds of audio sent per provider per day. Stored as JSON in
-%LOCALAPPDATA%\\CaptionBand\\usage.json.
+%LOCALAPPDATA%\CaptionBand\usage.json.
 
 The dashboard reads this and shows:
 - Hours used this month per provider
@@ -33,6 +33,10 @@ RATES_USD_PER_HOUR = {
     "google": 1.54,            # Speech v2 + Translate v3 combined
     "groq": 0.10,              # whisper-large-v3-turbo + Llama 3.3 70B
     "openai_cerebras": 0.36,   # OpenAI Whisper-1 (~$0.006/min) + Cerebras free
+    # Per session / target language (~$0.034/min Realtime API). The tracker
+    # aggregates one stream per provider, so this base rate is per target;
+    # the provider itself warns at start that cost multiplies per language.
+    "openai_realtime": 2.04,
     "openrouter": 0.40,        # ~$0.36/h Whisper + ~$0.04/h Llama via OR markup
     "whisper_local": 0.0,      # local — no marginal cost
 }
@@ -43,6 +47,7 @@ FREE_TIER_HOURS_MONTH = {
     "google": 1.0,             # 60 free minutes/month
     "groq": 0.0,               # rate-limited but no free hour quota
     "openai_cerebras": 0.0,    # OpenAI is paid from minute 1
+    "openai_realtime": 0.0,
     "openrouter": 0.0,
     "whisper_local": float("inf"),
 }

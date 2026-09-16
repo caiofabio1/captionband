@@ -1,7 +1,7 @@
 """End-to-end test of the INSTALLED build — the test that was missing.
 
 Everything else in this repo exercises the source tree. This installs
-Output\\CaptionBandSetup.exe silently, launches the installed exe
+Output\CaptionBandSetup.exe silently, launches the installed exe
 the way an operator would (auto-start), plays real speech through the
 speakers, presses the real global hotkey, and reads back app.log.
 
@@ -10,7 +10,7 @@ config.json (restored afterwards, byte for byte) because there is no other
 way to press "Iniciar" on a tray app from a script. Secrets are never read
 or printed: they live in the keyring, not in the file.
 
-Run:  python e2e_installed.py            (needs Output\\...Setup.exe built)
+Run:  python e2e_installed.py            (needs Output\...Setup.exe built)
 """
 from __future__ import annotations
 
@@ -150,10 +150,14 @@ def main() -> int:
     for e in errors[:5]:
         print("  ERROR:", e)
 
-    quit_ok = "app quit normally" in text or True   # killed by us; informative only
+    # Killed by us, so "app quit normally" never appears — informative only,
+    # deliberately NOT part of the verdict (a condition that cannot fail
+    # must not sit inside the pass/fail conjunction).
+    quit_ok = "app quit normally" in text
+    print("saida normal do app:", quit_ok)
     print("settings window   :", "viva" if settings_alive else "MORREU")
     ok = alive and settings_alive and finals >= 2 and partials >= 1 and pinned >= 1 \
-        and back_auto >= 1 and hotkey and tracebacks == 0 and quit_ok
+        and back_auto >= 1 and hotkey and tracebacks == 0
     print()
     print("VEREDITO:", "PASSOU — exe instalado legenda, troca idioma por F9 e volta"
           if ok else "FALHOU")
