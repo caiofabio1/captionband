@@ -463,7 +463,7 @@ class TestSwapVersusStop:
         late.start()
         ctrl.stop()
 
-        ctrl._on_swap_result(True, ctrl.config, late, "")
+        ctrl._on_swap_result(True, ctrl.config, late, "", ctrl._swap_gen)
 
         assert not late.running, "the orphaned provider was left running"
         assert late.stop_calls == 1
@@ -512,7 +512,8 @@ class TestHealthReturnsToOk:
         assert seen[-1] == STATUS_FAILING
 
         ctrl._on_swap_result(True, ctrl.config,
-                             _SwapProvider(lambda e: None, lambda s: None), "")
+                             _SwapProvider(lambda e: None, lambda s: None), "",
+                             ctrl._swap_gen)
         assert seen[-1] == STATUS_OK, "recovery never announced itself"
 
 

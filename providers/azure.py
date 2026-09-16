@@ -109,6 +109,12 @@ class AzureProvider(TranslationProvider):
         self._push_stream: speechsdk.audio.PushAudioInputStream | None = None
         self._recognizer: speechsdk.translation.TranslationRecognizer | None = None
         self._lock = threading.Lock()
+        # Guards ONLY the _push_stream reference. Kept separate from _lock
+        # because the reconnect path holds _lock across
+        # start_continuous_recognition (~1 s blocking); if push_audio had to
+        # take _lock, the capture thread would stall for the whole reconnect.
+        # Lock order, where both are held: _lock -> _stream_lock.
+        self._stream_lock = threading.Lock()
         self._running = False
         # True while stop() is tearing down: suppresses the reconnect that
         # a deliberate shutdown would otherwise trigger.
@@ -147,8 +153,10 @@ class AzureProvider(TranslationProvider):
         audio_format = speechsdk.audio.AudioStreamFormat(
             samples_per_second=self.samplerate, bits_per_sample=16, channels=1
         )
-        self._push_stream = speechsdk.audio.PushAudioInputStream(stream_format=audio_format)
-        audio_config = speechsdk.audio.AudioConfig(stream=self._push_stream)
+        stream = speechsdk.audio.PushAudioInputStream(stream_format=audio_format)
+        with self._stream_lock:
+            self._push_stream = stream
+        audio_config = speechsdk.audio.AudioConfig(stream=stream)
 
         if self.streaming_mode:
             # Single-language: enables `recognizing` partials with translation.
@@ -468,13 +476,14 @@ class AzureProvider(TranslationProvider):
                 self._recognizer.stop_continuous_recognition()
             except Exception:
                 log.exception("error stopping recognizer")
+            with self._stream_lock:
+                stream, self._push_stream = self._push_stream, None
             try:
-                if self._push_stream is not None:
-                    self._push_stream.close()
+                if stream is not None:
+                    stream.close()
             except Exception:
                 pass
             self._recognizer = None
-            self._push_stream = None
             self._running = False
             log.info("azure provider stopped")
 
@@ -499,10 +508,19 @@ class AzureProvider(TranslationProvider):
             self.start()
 
     def push_audio(self, audio_bytes: bytes) -> None:
-        if self._push_stream is None:
+        # Read the reference under _stream_lock: stop() and the reconnect path
+        # swap/close the stream concurrently, and an unsynchronized read could
+        # write into a stream that was closed between the None check and the
+        # write. Frames that arrive during a reconnect window are still
+        # dropped (stream is None or about to be replaced) — acceptable; the
+        # alternative is stalling the capture thread for the whole reconnect.
+        # _stream_lock is never held across a blocking call, so this stay fast.
+        with self._stream_lock:
+            stream = self._push_stream
+        if stream is None:
             return
         try:
-            self._push_stream.write(audio_bytes)
+            stream.write(audio_bytes)
         except Exception:
             log.exception("error pushing audio to azure")
 
