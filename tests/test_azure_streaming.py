@@ -21,6 +21,7 @@ import pytest
 import config as config_mod
 from config import AppConfig, load_config, save_config
 
+from .conftest import requires_azure
 
 # ---------------------------------------------------------------------- config
 
@@ -75,6 +76,7 @@ class TestStreamingConfigRoundTrip:
 # ---------------------------------------------------------------------- factory
 
 
+@requires_azure
 class TestAzureFactoryWiring:
     def test_factory_passes_streaming_flags(self):
         from providers import build_provider
@@ -124,6 +126,7 @@ class TestAzureFactoryWiring:
 # ---------------------------------------------------------------------- provider
 
 
+@requires_azure
 class TestAzureProviderValidation:
     def test_streaming_mode_requires_streaming_language(self):
         from providers.azure import AzureProvider
@@ -274,7 +277,8 @@ class TestOverlayPartialDedup:
 
 @pytest.fixture(scope="session")
 def qapp():
-    from PyQt6.QtWidgets import QApplication
     import sys
+
+    from PyQt6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication(sys.argv)
     yield app

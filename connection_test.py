@@ -11,7 +11,6 @@ import json
 import logging
 import os
 import tempfile
-from typing import Optional
 
 log = logging.getLogger(__name__)
 
@@ -22,8 +21,8 @@ def test_azure(speech_key: str, region: str) -> tuple[bool, str]:
     if not region:
         return False, "Região vazia."
     try:
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         # Hit the issueToken endpoint — fastest auth check Azure exposes
         url = f"https://{region}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
@@ -45,7 +44,7 @@ def test_azure(speech_key: str, region: str) -> tuple[bool, str]:
         if exc.code == 401:
             return False, "Speech Key inválida (HTTP 401)."
         if exc.code == 403:
-            return False, f"Acesso negado (HTTP 403). Verifique pricing tier e região."
+            return False, "Acesso negado (HTTP 403). Verifique pricing tier e região."
         return False, f"HTTP {exc.code}: {exc.reason}"
     except Exception as exc:
         return False, f"Erro: {exc}"
@@ -85,8 +84,8 @@ def test_google(credentials_json: str, project_id: str, location: str = "global"
         return False, "Project ID vazio."
 
     # Resolve credentials: file path OR inline JSON
-    creds_path: Optional[str] = None
-    temp_path: Optional[str] = None
+    creds_path: str | None = None
+    temp_path: str | None = None
     try:
         if os.path.isfile(credentials_json):
             creds_path = credentials_json
@@ -218,8 +217,9 @@ def test_whisper_local(model: str, device: str = "cpu", compute_type: str = "int
     First call downloads ~150MB-3GB depending on model size; subsequent are cached."""
     try:
         from faster_whisper import WhisperModel
-        from providers.whisper_local import WHISPER_MODELS
+
         from config import app_data_dir
+        from providers.whisper_local import WHISPER_MODELS
 
         repo = WHISPER_MODELS.get(model, model)
         cache_dir = str(app_data_dir() / "models")

@@ -21,9 +21,8 @@ try:
 except ImportError:
     OpenAI = None  # type: ignore[assignment,misc]
 
+from .base import OnTranslationCallback, ProviderCapabilities
 from .groq import GroqProvider
-from .base import ProviderCapabilities, OnTranslationCallback
-
 
 log = logging.getLogger(__name__)
 

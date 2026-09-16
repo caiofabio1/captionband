@@ -20,7 +20,6 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional
 
 try:
     from openai import OpenAI
@@ -36,7 +35,6 @@ from .base import (
     TranslationEvent,
     TranslationProvider,
 )
-
 
 log = logging.getLogger(__name__)
 
@@ -85,8 +83,8 @@ class GroqProvider(TranslationProvider):
         self._client = None
         self._stt_client = None
         self._translation_client = None
-        self._executor: Optional[ThreadPoolExecutor] = None
-        self._buffer: Optional[ChunkedAudioBuffer] = None
+        self._executor: ThreadPoolExecutor | None = None
+        self._buffer: ChunkedAudioBuffer | None = None
         self._lock = threading.Lock()
         self._running = False
 
@@ -94,12 +92,10 @@ class GroqProvider(TranslationProvider):
         with self._lock:
             if self._running:
                 return
-            try:
-                from openai import OpenAI
-            except ImportError as exc:
+            if OpenAI is None:
                 raise RuntimeError(
                     "Pacote 'openai' não instalado. Instale com `pip install openai`."
-                ) from exc
+                )
 
             # Split: STT client and translation client (both override-able in subclasses)
             self._stt_client = self._build_stt_client()
@@ -291,8 +287,12 @@ class GroqProvider(TranslationProvider):
         return False
 
     def _build_stt_client(self):
-        """Override in subclasses to route STT to a different API."""
-        from openai import OpenAI
+        """Override in subclasses to route STT to a different API.
+
+        Uses the module-level OpenAI global (not a local import) so tests
+        can patch providers.groq.OpenAI and so start()'s
+        `OpenAI is None` guard actually protects this call.
+        """
         return OpenAI(
             api_key=self.api_key,
             base_url=GROQ_BASE_URL,
@@ -305,8 +305,11 @@ class GroqProvider(TranslationProvider):
         return self.transcription_model
 
     def _build_translation_client(self):
-        """Override in subclasses to route translation to a different API."""
-        from openai import OpenAI
+        """Override in subclasses to route translation to a different API.
+
+        Same reasoning as _build_stt_client: module-level global, not a
+        local import.
+        """
         return OpenAI(
             api_key=self.api_key,
             base_url=GROQ_BASE_URL,
@@ -318,7 +321,7 @@ class GroqProvider(TranslationProvider):
         """Override in subclasses to use a different model name."""
         return self.translation_model
 
-    def _call_transcription(self, wav_bytes: bytes) -> Optional[tuple[str, Optional[str]]]:
+    def _call_transcription(self, wav_bytes: bytes) -> tuple[str, str | None] | None:
         if self._stt_client is None:
             return None
         try:
@@ -346,7 +349,7 @@ class GroqProvider(TranslationProvider):
             self.report_exception(exc, "transcription")
             return None
 
-    def _translate_all(self, text: str, source_lang: Optional[str]) -> dict[str, str]:
+    def _translate_all(self, text: str, source_lang: str | None) -> dict[str, str]:
         out: dict[str, str] = {}
         if self._translation_client is None:
             return out
@@ -382,7 +385,7 @@ class GroqProvider(TranslationProvider):
             )
         return out
 
-    def _call_translation(self, text: str, source_lang: Optional[str], target_lang: str) -> Optional[str]:
+    def _call_translation(self, text: str, source_lang: str | None, target_lang: str) -> str | None:
         if self._translation_client is None:
             return None
         prompt = (
@@ -403,5 +406,5 @@ class GroqProvider(TranslationProvider):
             )
             return resp.choices[0].message.content.strip()
         except Exception as exc:
-            self.report_exception(exc, "translation->{}".format(target_lang))
+            self.report_exception(exc, f"translation->{target_lang}")
             return None

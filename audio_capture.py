@@ -11,11 +11,10 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import numpy as np
 import soundcard as sc
-
 
 log = logging.getLogger(__name__)
 
@@ -68,7 +67,7 @@ def list_output_devices() -> list[dict]:
     return out
 
 
-def find_device(name_substring: Optional[str]):
+def find_device(name_substring: str | None):
     """Resolve a speaker by partial name match. Returns a soundcard speaker or None for default."""
     if not name_substring:
         try:
@@ -101,7 +100,7 @@ class AudioCapture:
         samplerate: int = 16000,
         channels: int = 1,
         blocksize_ms: int = 50,
-        on_died: Optional[Callable[[str], None]] = None,
+        on_died: Callable[[str], None] | None = None,
     ):
         # device_index can be: None (default), a soundcard speaker, or a name substring
         self.on_audio = on_audio
@@ -115,7 +114,7 @@ class AudioCapture:
         # overlay stays blank — indistinguishable from nobody speaking.
         self.on_died = on_died
 
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._stop_evt = threading.Event()
         self._lock = threading.Lock()
         self._running = False
@@ -172,7 +171,7 @@ class AudioCapture:
                         # The common live-event trigger: headphones unplugged,
                         # Bluetooth dropped, or Windows switched the default
                         # output device out from under us.
-                        reason = "A captura de áudio parou: {}".format(exc)
+                        reason = f"A captura de áudio parou: {exc}"
                         log.exception("recorder.record failed")
                         break
                     # Mark liveness BEFORE inspecting the payload. This
@@ -192,7 +191,7 @@ class AudioCapture:
                     except Exception:
                         log.exception("on_audio callback failed")
         except Exception as exc:
-            reason = "A captura de áudio caiu: {}".format(exc)
+            reason = f"A captura de áudio caiu: {exc}"
             log.exception("audio capture thread crashed")
         finally:
             if com_ready:

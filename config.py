@@ -9,10 +9,8 @@ import datetime
 import json
 import logging
 import os
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
-
 
 log = logging.getLogger(__name__)
 
@@ -61,7 +59,7 @@ def log_path() -> Path:
 
 @dataclass
 class AudioConfig:
-    device_name: Optional[str] = None
+    device_name: str | None = None
     samplerate: int = 16000
     channels: int = 1
 
@@ -311,21 +309,21 @@ def _hydrate_secrets(cfg: AppConfig) -> AppConfig:
     from disk (migration path).
     """
     try:
-        from secrets_store import get_secret, set_secret, is_available
+        from secrets_store import get_secret, is_available, set_secret
     except ImportError:
         return cfg
     if not is_available():
         return cfg
 
-    for field in SECRET_FIELDS:
-        current = getattr(cfg, field, "") or ""
+    for name in SECRET_FIELDS:
+        current = getattr(cfg, name, "") or ""
         if current:
             # Legacy plain-text value — push to keyring once, keep using it.
-            set_secret(field, current)
+            set_secret(name, current)
             continue
-        stored = get_secret(field) or ""
+        stored = get_secret(name) or ""
         if stored:
-            setattr(cfg, field, stored)
+            setattr(cfg, name, stored)
     return cfg
 
 
@@ -336,7 +334,7 @@ def save_config(cfg: AppConfig) -> None:
 
     # Move secret fields into keyring; blank them in the JSON payload
     try:
-        from secrets_store import set_secret, is_available
+        from secrets_store import is_available, set_secret
         if is_available():
             for field in SECRET_FIELDS:
                 value = payload.get(field) or ""

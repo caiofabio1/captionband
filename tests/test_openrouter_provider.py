@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from providers.openrouter import OpenRouterProvider, OPENROUTER_BASE_URL
+from providers.openrouter import OPENROUTER_BASE_URL, OpenRouterProvider
 
 
 def _make_provider():

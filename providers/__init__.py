@@ -8,7 +8,7 @@ Usage:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from .base import (
     OnStatusCallback,
@@ -18,7 +18,6 @@ from .base import (
     TranslationEvent,
     TranslationProvider,
 )
-
 
 if TYPE_CHECKING:
     from config import AppConfig
@@ -63,15 +62,15 @@ def _import_failure_message(name: str, exc: BaseException) -> str:
     package, _module = PROVIDER_REQUIREMENTS.get(name, (name, name))
     label = PROVIDER_LABELS.get(name, name)
     return (
-        "O provedor '{label}' não pôde ser carregado.\n\n"
-        "Causa: {kind}: {exc}\n\n"
-        "Isto normalmente significa que o pacote '{pkg}' não está instalado "
+        f"O provedor '{label}' não pôde ser carregado.\n\n"
+        f"Causa: {type(exc).__name__}: {exc}\n\n"
+        f"Isto normalmente significa que o pacote '{package}' não está instalado "
         "ou está com versão incompatível neste Python.\n\n"
-        "Conserto: pip install --upgrade --force-reinstall {pkg}"
-    ).format(label=label, kind=type(exc).__name__, exc=exc, pkg=package)
+        f"Conserto: pip install --upgrade --force-reinstall {package}"
+    )
 
 
-def provider_capabilities(name: str) -> Optional[ProviderCapabilities]:
+def provider_capabilities(name: str) -> ProviderCapabilities | None:
     """Capabilities of a provider WITHOUT instantiating or configuring it.
 
     The controller needs `ordered_by_protocol` before it has a live provider,
@@ -123,13 +122,13 @@ def _provider_class(name: str):
     except BaseException as exc:  # SystemError included, deliberately
         log.exception("failed to import provider %r", name)
         raise ProviderUnavailable(_import_failure_message(name, exc)) from exc
-    raise ProviderUnavailable("Provedor desconhecido: {!r}".format(name))
+    raise ProviderUnavailable(f"Provedor desconhecido: {name!r}")
 
 
 def build_provider(
-    app_config: "AppConfig",
+    app_config: AppConfig,
     on_event: OnTranslationCallback,
-    on_status: Optional[OnStatusCallback] = None,
+    on_status: OnStatusCallback | None = None,
 ) -> TranslationProvider:
     """Build a configured provider with its status channel wired.
 
@@ -149,7 +148,7 @@ def build_provider(
 
 
 def _construct(
-    app_config: "AppConfig",
+    app_config: AppConfig,
     on_event: OnTranslationCallback,
 ) -> TranslationProvider:
     name = app_config.provider
@@ -256,19 +255,19 @@ def _construct(
             on_event=on_event,
             samplerate=app_config.audio.samplerate,
         )
-    raise ProviderUnavailable("Provedor desconhecido: {!r}".format(name))
+    raise ProviderUnavailable(f"Provedor desconhecido: {name!r}")
 
 
 __all__ = [
-    "TranslationProvider",
-    "TranslationEvent",
-    "ProviderStatus",
-    "ProviderCapabilities",
-    "ProviderUnavailable",
-    "OnTranslationCallback",
-    "OnStatusCallback",
     "PROVIDER_LABELS",
     "PROVIDER_REQUIREMENTS",
+    "OnStatusCallback",
+    "OnTranslationCallback",
+    "ProviderCapabilities",
+    "ProviderStatus",
+    "ProviderUnavailable",
+    "TranslationEvent",
+    "TranslationProvider",
     "build_provider",
     "provider_capabilities",
 ]

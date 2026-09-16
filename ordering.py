@@ -29,10 +29,9 @@ replaces them in place — and delaying them defeats the point of having them.
 from __future__ import annotations
 
 import logging
-import time
 import threading
-from typing import Callable, Optional
-
+import time
+from collections.abc import Callable
 
 log = logging.getLogger(__name__)
 
@@ -136,7 +135,7 @@ class ReorderGate:
 
     # -- the gate -------------------------------------------------------
 
-    def submit(self, seq: Optional[int], payload: object) -> None:
+    def submit(self, seq: int | None, payload: object) -> None:
         """Queue a payload. Releases whatever became contiguous, in order.
 
         `seq is None` ⇒ caller declared the payload unsequenced; released
@@ -229,7 +228,7 @@ def _p95(values: list[float]) -> float:
     ordered = sorted(values)
     # Nearest-rank p95; for tiny samples this lands on the max, which is the
     # conservative choice while we are still learning the venue's latency.
-    idx = max(0, int(round(0.95 * len(ordered))) - 1)
+    idx = max(0, round(0.95 * len(ordered)) - 1)
     return ordered[idx]
 
 
@@ -347,8 +346,7 @@ def _selfcheck() -> None:
 
     assert delivered == sorted(delivered), (
         "entrega fora de ordem sob concorrencia; "
-        "primeiras divergencias: {}".format(
-            [(i, v) for i, v in enumerate(delivered) if i != v][:5])
+        f"primeiras divergencias: {[(i, v) for i, v in enumerate(delivered) if i != v][:5]}"
     )
     assert len(delivered) == n_items, (len(delivered), n_items)
     assert g.skipped == 0, g.skipped

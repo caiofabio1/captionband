@@ -145,8 +145,8 @@ class TestSettingsPreserveUneditedFields:
             win.close()
 
     def test_two_box_preview_opens_two_bands(self, qapp):
-        from settings_window import SettingsWindow
         from overlay_qt import CaptionOverlay
+        from settings_window import SettingsWindow
         win = SettingsWindow(AppConfig(provider="azure", azure_speech_key="k",
                                        target_languages=["en", "es"],
                                        overlay=OverlayConfig(split_languages=True)))
@@ -177,8 +177,8 @@ class TestSettingsPreserveUneditedFields:
 
 class TestSettingsPreviewIsOneWindowThatCloses:
     def test_preview_reuses_one_overlay_and_dies_with_the_dialog(self, qapp):
-        from settings_window import SettingsWindow
         from overlay_qt import CaptionOverlay
+        from settings_window import SettingsWindow
         win = SettingsWindow(AppConfig(provider="azure", azure_speech_key="k",
                                        target_languages=["en", "es"]))
         try:
@@ -251,7 +251,9 @@ class TestAudioMeterNeverTouchesWidgetsOffThread:
     a QProgressBar straight from the capture thread."""
 
     def test_capture_callback_updates_meter_via_queued_signal(self, qapp, monkeypatch):
-        import threading, time
+        import threading
+        import time
+
         import settings_window as S
         from settings_window import SettingsWindow
 

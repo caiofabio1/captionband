@@ -14,6 +14,7 @@ Tray UX:
 """
 from __future__ import annotations
 
+
 # ---------------------------------------------------------------- COM apartment
 # MUST run before anything imports `soundcard`, which calls
 # CoInitializeEx(MULTITHREADED) at import time on the importing thread. When that
@@ -54,11 +55,9 @@ import logging
 import logging.handlers
 import sys
 import threading
-from pathlib import Path
-from typing import Optional
 
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer
-from PyQt6.QtGui import QAction, QIcon, QPainter, QColor, QPixmap, QFont
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
+from PyQt6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QMenu,
@@ -66,16 +65,19 @@ from PyQt6.QtWidgets import (
     QSystemTrayIcon,
 )
 
-from config import AppConfig, KNOWN_LANGUAGES, load_config, save_config, log_path
 from audio_capture import AudioCapture, find_device
+from config import KNOWN_LANGUAGES, AppConfig, load_config, log_path, save_config
+from constants import APP_VERSION
+from ordering import ReorderGate
+from overlay_qt import CaptionOverlay
 from providers import (
-    build_provider,
-    provider_capabilities,
+    PROVIDER_LABELS,
     ProviderStatus,
     ProviderUnavailable,
     TranslationEvent,
     TranslationProvider,
-    PROVIDER_LABELS,
+    build_provider,
+    provider_capabilities,
 )
 from providers.base import (
     CODE_DEVICE,
@@ -84,13 +86,9 @@ from providers.base import (
     STATUS_FATAL,
     STATUS_OK,
 )
-from ordering import ReorderGate
-from overlay_qt import CaptionOverlay
 from settings_window import SettingsWindow
 from transcript import TranscriptWriter
-from updater import check_for_update_async, ReleaseInfo
-from constants import APP_VERSION
-
+from updater import check_for_update_async
 
 log = logging.getLogger("captionband")
 
@@ -151,7 +149,7 @@ def _make_icon(state: str = "stopped") -> QIcon:
 # ---------------------------------------------------------------------- overlays
 
 
-def split_overlay_configs(cfg: AppConfig) -> tuple[AppConfig, Optional[AppConfig]]:
+def split_overlay_configs(cfg: AppConfig) -> tuple[AppConfig, AppConfig | None]:
     """Configs for the primary band and, in two-box mode, the second box.
 
     Pure function so it can be tested without Qt. The CONTROLLER keeps the
@@ -259,17 +257,17 @@ class TranslationController(QObject):
         super().__init__()
         self.config = config
         self.overlay = overlay
-        self._capture: Optional[AudioCapture] = None
-        self._translator: Optional[TranslationProvider] = None
-        self._transcript: Optional[TranscriptWriter] = None
+        self._capture: AudioCapture | None = None
+        self._translator: TranslationProvider | None = None
+        self._transcript: TranscriptWriter | None = None
         self._running = False
         self._failure_timestamps: list[float] = []
         self._tried_fallbacks: set[str] = set()
-        self._session_start: Optional[float] = None
+        self._session_start: float | None = None
 
         # Reorder gate — created per session, only for providers whose results
         # can overtake each other. See ordering.py.
-        self._gate: Optional[ReorderGate] = None
+        self._gate: ReorderGate | None = None
         self._last_health: tuple[str, str, str] = (STATUS_OK, "", "")
         self._capture_died = False
         self._capture_retry = 0
@@ -285,7 +283,7 @@ class TranslationController(QObject):
         self._swap_in_progress = False
         # Last source-mode the operator asked for while a swap was running.
         # Requests used to be dropped on the floor in that window.
-        self._pending_source_mode: Optional[AppConfig] = None
+        self._pending_source_mode: AppConfig | None = None
         self._pin_hinted = False
         # Bumped by stop(). A pending capture-reopen timer carries the value it
         # was scheduled with and does nothing if the session has moved on.
@@ -313,6 +311,7 @@ class TranslationController(QObject):
         """Record a provider failure. Returns True if threshold reached and
         fallback should be triggered."""
         import time as _t
+
         from constants import PROVIDER_FAILURE_THRESHOLD, PROVIDER_FAILURE_WINDOW_S
 
         now = _t.monotonic()
@@ -390,7 +389,7 @@ class TranslationController(QObject):
 
     # ------------------------------------------------- source language
 
-    def source_mode(self) -> Optional[str]:
+    def source_mode(self) -> str | None:
         """Current source setting: a language code, or None for auto-detect."""
         if self.config.provider != "azure":
             return None
@@ -398,7 +397,7 @@ class TranslationController(QObject):
             return None
         return self.config.azure_streaming_language
 
-    def set_source_mode(self, language: Optional[str]) -> bool:
+    def set_source_mode(self, language: str | None) -> bool:
         """Pin the source language, or pass None to go back to auto-detect.
 
         Three cases, cheapest first:
@@ -477,8 +476,7 @@ class TranslationController(QObject):
         self._swap_in_progress = False
         assert isinstance(new_cfg, AppConfig)
         if not ok or provider is None:
-            msg = "Falha ao iniciar o provedor {}: {}".format(
-                PROVIDER_LABELS.get(new_cfg.provider, new_cfg.provider), error)
+            msg = f"Falha ao iniciar o provedor {PROVIDER_LABELS.get(new_cfg.provider, new_cfg.provider)}: {error}"
             self._set_health(STATUS_FATAL, "", msg)
             self._pending_source_mode = None
             self.source_mode_changed.emit(False, msg)
@@ -544,8 +542,7 @@ class TranslationController(QObject):
             provider.start()
         except Exception as exc:
             log.exception("provider swap failed")
-            self._set_health(STATUS_FATAL, "", "Falha ao iniciar o provedor {}: {}".format(
-                PROVIDER_LABELS.get(new_cfg.provider, new_cfg.provider), exc))
+            self._set_health(STATUS_FATAL, "", f"Falha ao iniciar o provedor {PROVIDER_LABELS.get(new_cfg.provider, new_cfg.provider)}: {exc}")
             return False
 
         self._install_provider(new_cfg, provider)
@@ -709,8 +706,9 @@ class TranslationController(QObject):
 
         # Record session duration before tearing down
         try:
-            import usage_tracker
             import time as _t
+
+            import usage_tracker
             if self._session_start is not None:
                 seconds = _t.monotonic() - self._session_start
                 usage_tracker.add_seconds(self.config.provider, seconds)
@@ -914,8 +912,8 @@ class TranslationController(QObject):
             self.stop()
             self._set_health(
                 STATUS_FATAL, CODE_DEVICE,
-                "Sem áudio do sistema: {} Confira o dispositivo de saída e "
-                "inicie de novo.".format(reason))
+                f"Sem áudio do sistema: {reason} Confira o dispositivo de saída e "
+                "inicie de novo.")
             self.state_changed.emit("error")
             return
         delay = self.CAPTURE_RETRY_DELAYS_S[self._capture_retry]
@@ -923,7 +921,7 @@ class TranslationController(QObject):
         self._capture_recovering = True
         self._set_health(
             STATUS_FAILING, CODE_DEVICE,
-            "{} Reconectando o áudio em {:.0f}s…".format(reason, delay))
+            f"{reason} Reconectando o áudio em {delay:.0f}s…")
         # Slot on the GUI thread, so a QTimer here does fire (unlike from a
         # worker — see the note on the internal signals above).
         # The timer carries the session number: stop() bumps it, so a pending
@@ -935,7 +933,7 @@ class TranslationController(QObject):
         QTimer.singleShot(int(delay * 1000),
                           lambda: self._reopen_capture(session))
 
-    def _reopen_capture(self, session: Optional[int] = None) -> None:
+    def _reopen_capture(self, session: int | None = None) -> None:
         """Rebuild the capture against the output device Windows has NOW.
 
         A pinned device that vanished resolves to None → default speaker,
@@ -960,7 +958,7 @@ class TranslationController(QObject):
         except Exception as exc:
             log.exception("capture reopen failed")
             self._handle_capture_loss(
-                "A captura de áudio falhou ao reabrir: {}.".format(exc))
+                f"A captura de áudio falhou ao reabrir: {exc}.")
 
     def _on_tick(self) -> None:
         """Serviced every TICK_MS on the GUI thread."""
@@ -986,8 +984,8 @@ class TranslationController(QObject):
         if stalled > self.CAPTURE_STALL_S:
             self._capture_died = True
             self._handle_capture_loss(
-                "Sem áudio do sistema há {:.0f}s. O dispositivo de saída pode "
-                "ter mudado.".format(stalled)
+                f"Sem áudio do sistema há {stalled:.0f}s. O dispositivo de saída pode "
+                "ter mudado."
             )
             return
 
@@ -1027,10 +1025,9 @@ class TranslationController(QObject):
             self._pin_hinted = True
             self._set_health(
                 STATUS_DEGRADED, "",
-                "Fixado em {}, mas nada reconhecido há {:.0f}s com áudio "
+                f"Fixado em {KNOWN_LANGUAGES.get(self.source_mode(), self.source_mode())}, mas nada reconhecido há {quiet_for:.0f}s com áudio "
                 "entrando. O idioma falado é outro? Volte para Auto-detectar "
-                "(F9).".format(KNOWN_LANGUAGES.get(self.source_mode(), self.source_mode()),
-                               quiet_for))
+                "(F9).")
         if quiet_for < self.RESULT_STALL_S:
             return
         # Don't thrash: one recovery attempt per stall window.
@@ -1045,8 +1042,8 @@ class TranslationController(QObject):
         )
         self._set_health(
             STATUS_FAILING, "",
-            "Há {:.0f}s recebendo áudio sem legenda. Reiniciando o "
-            "reconhecimento…".format(quiet_for),
+            f"Há {quiet_for:.0f}s recebendo áudio sem legenda. Reiniciando o "
+            "reconhecimento…",
         )
         # Rebuild the provider in place: capture and the transcript file
         # survive, so the event keeps its single recording.
@@ -1078,7 +1075,7 @@ class TrayApp(QObject):
         super().__init__()
         self._update_available.connect(self._notify_update)
         self._language_cycle_requested.connect(self._apply_pending_language)
-        self._pending_language: Optional[str] = None
+        self._pending_language: str | None = None
         self._latest_release_url = ""
         self.app = QApplication(sys.argv)
         self.app.setQuitOnLastWindowClosed(False)
@@ -1100,7 +1097,7 @@ class TrayApp(QObject):
         self.overlay = CaptionOverlay(first_cfg)
         self.overlay.close_requested.connect(self._on_overlay_close_requested)
         # Second box for two-box bilingual mode; created lazily.
-        self.overlay2: Optional[CaptionOverlay] = None
+        self.overlay2: CaptionOverlay | None = None
         self.controller = TranslationController(self.config, self.overlay)
         self.controller.state_changed.connect(self._on_state_changed)
         self.controller.provider_changed.connect(self._on_provider_changed)
@@ -1109,7 +1106,7 @@ class TrayApp(QObject):
         self._pending_mode_label = ""
         self._health = (STATUS_OK, "", "")
         self._last_balloon_at = 0.0
-        self.settings_window: Optional[SettingsWindow] = None
+        self.settings_window: SettingsWindow | None = None
         self._presentation_mode_active = False
         self._saved_overlay_config = None
         self._saved_display_mode = ""
@@ -1152,10 +1149,8 @@ class TrayApp(QObject):
         # The old text told the operator to use a tray menu item called
         # 'Sobre'. No such item exists — 'Sobre' is a TAB inside Settings.
         self.tray.showMessage(
-            "Atualização disponível ({})".format(tag),
-            "Versão atual: {}. Abra Configurações → aba 'Sobre' para baixar.".format(
-                APP_VERSION
-            ),
+            f"Atualização disponível ({tag})",
+            f"Versão atual: {APP_VERSION}. Abra Configurações → aba 'Sobre' para baixar.",
             QSystemTrayIcon.MessageIcon.Information,
             8000,
         )
@@ -1301,7 +1296,7 @@ class TrayApp(QObject):
         for code in languages:
             label = KNOWN_LANGUAGES.get(code, code)
             mark = "● " if code == active else "   "
-            action = QAction("{}{}".format(mark, label), self.lang_menu)
+            action = QAction(f"{mark}{label}", self.lang_menu)
             action.triggered.connect(
                 lambda _checked=False, c=code: self.switch_source_language(c)
             )
@@ -1312,8 +1307,7 @@ class TrayApp(QObject):
         note.setEnabled(False)
         self.lang_menu.addAction(note)
         if self.config.azure_switch_hotkey:
-            hint = QAction("Atalho global: {} (alterna entre estes)".format(
-                self.config.azure_switch_hotkey.upper()), self.lang_menu)
+            hint = QAction(f"Atalho global: {self.config.azure_switch_hotkey.upper()} (alterna entre estes)", self.lang_menu)
             hint.setEnabled(False)
             self.lang_menu.addAction(hint)
 
@@ -1421,7 +1415,7 @@ class TrayApp(QObject):
             log.exception("could not persist caption screen")
         self._show_overlays()
 
-    def switch_source_language(self, language: Optional[str]) -> None:
+    def switch_source_language(self, language: str | None) -> None:
         """Tray submenu and global hotkey. `None` means auto-detect."""
         if self.config.provider != "azure":
             return
@@ -1442,7 +1436,7 @@ class TrayApp(QObject):
         # _on_source_mode_changed announces the result.
         self._pending_mode_label = (
             "Auto-detectar (PT / EN / ES)" if language is None
-            else "Fixado em {}".format(KNOWN_LANGUAGES.get(language, language)))
+            else f"Fixado em {KNOWN_LANGUAGES.get(language, language)}")
         if self.controller.is_running():
             self.status_action.setText("Status: trocando idioma…")
         else:
@@ -1469,7 +1463,7 @@ class TrayApp(QObject):
 
     def _language_cycle(self) -> list:
         """The order the hotkey walks: auto first, then each quick language."""
-        return [None] + list(self.config.azure_quick_languages or [])
+        return [None, *(self.config.azure_quick_languages or [])]
 
     def cycle_source_language(self) -> None:
         """Hotkey handler — steps through auto → pt → en → es → auto."""
@@ -1591,7 +1585,7 @@ class TrayApp(QObject):
             self.status_action.setText("Status: ▶ rodando (instável)")
             self.tray.setIcon(self._icons["degraded"])
         else:
-            self.status_action.setText("Status: ⚠ {}".format(message[:60]))
+            self.status_action.setText(f"Status: ⚠ {message[:60]}")
             self.tray.setIcon(self._icons["error"])
 
         self._update_tooltip()
@@ -1621,9 +1615,9 @@ class TrayApp(QObject):
         if self.controller.is_running() and kind != STATUS_OK and message:
             # Windows cuts tray tooltips at ~128 chars; a truncated sentence
             # beats a truncated word salad.
-            suffix = "\n{}".format(message[:90])
+            suffix = f"\n{message[:90]}"
         self.tray.setToolTip(
-            "CaptionBand — {} ({}){}".format(provider, state, suffix)
+            f"CaptionBand — {provider} ({state}){suffix}"
         )
 
     def _show_welcome_notification(self) -> None:
@@ -1721,9 +1715,10 @@ class TrayApp(QObject):
         Stopping an active session first, because the audio probe needs the
         capture device the session is holding.
         """
-        import preflight
         from PyQt6.QtCore import Qt as _Qt
         from PyQt6.QtWidgets import QApplication as _QApp
+
+        import preflight
 
         was_running = self.controller.is_running()
         if was_running:
@@ -1742,7 +1737,7 @@ class TrayApp(QObject):
             ready, report = preflight.summarize(steps)
         except Exception as exc:
             log.exception("preflight failed")
-            ready, report = False, "A checagem falhou: {}".format(exc)
+            ready, report = False, f"A checagem falhou: {exc}"
         finally:
             _QApp.restoreOverrideCursor()
 
@@ -1773,6 +1768,7 @@ class TrayApp(QObject):
     def _open_transcripts_folder(self) -> None:
         import os
         import subprocess
+
         from config import app_data_dir
 
         folder = str(app_data_dir() / "transcripts")
@@ -1978,7 +1974,7 @@ def main() -> int:
     # message through logging puts that text in app.log right before the
     # 'Fatal Python error: Aborted' that crash.log records.
     try:
-        from PyQt6.QtCore import qInstallMessageHandler, QtMsgType
+        from PyQt6.QtCore import QtMsgType, qInstallMessageHandler
 
         _qt_levels = {
             QtMsgType.QtDebugMsg: logging.DEBUG, QtMsgType.QtInfoMsg: logging.INFO,

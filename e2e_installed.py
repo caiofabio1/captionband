@@ -41,8 +41,8 @@ INSTALL_DIR = os.path.join(os.environ["LOCALAPPDATA"], "Programs", "CaptionBand"
 EXE = os.path.join(INSTALL_DIR, "CaptionBand.exe")
 
 sys.path.insert(0, HERE)
-from e2e_live import play, synthesize  # noqa: E402
 from config import load_config  # noqa: E402
+from e2e_live import play, synthesize  # noqa: E402
 
 
 def sh(*args) -> int:
@@ -139,7 +139,7 @@ def main() -> int:
     back_auto = len(re.findall(r"provider swapped: streaming=False", text))
     hotkey = "registered global hotkey" in text
     tracebacks = text.count("Traceback")
-    errors = [l.strip()[:140] for l in lines if "[ERROR]" in l or "[CRITICAL]" in l]
+    errors = [line.strip()[:140] for line in lines if "[ERROR]" in line or "[CRITICAL]" in line]
 
     print()
     print("legendas finais   :", finals)

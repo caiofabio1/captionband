@@ -15,13 +15,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from providers.base import ProviderCapabilities
 from providers.openai_realtime import (
     TARGET_SAMPLERATE,
     OpenAIRealtimeProvider,
-    _TranslationSession,
     _resample_to_24k,
+    _TranslationSession,
 )
-from providers.base import ProviderCapabilities
 
 
 class TestResampling:

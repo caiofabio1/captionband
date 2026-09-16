@@ -11,13 +11,15 @@ sensitive value (config.json keeps the path; the actual JSON contents stay
 in keyring or on disk in user-only readable mode).
 
 When `keyring` is unavailable (rare on Windows but possible on stripped
-images), we fall back transparently to plain JSON storage so the app keeps
-working — but log a warning.
+images), every get_secret() call returns None and set_secret()/delete_secret()
+return False. The app keeps working because config.py then falls back to
+keeping the API keys in config.json — writing them in PLAIN TEXT and logging
+a loud warning. This module itself never touches that file; it only talks to
+the OS credential store.
 """
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from constants import APP_NAME
 
@@ -57,7 +59,7 @@ def _backend():
         return None
 
 
-def get_secret(key: str) -> Optional[str]:
+def get_secret(key: str) -> str | None:
     """Return the secret stored under SERVICE/key, or None if unset/unavailable."""
     kr = _backend()
     if kr is None:

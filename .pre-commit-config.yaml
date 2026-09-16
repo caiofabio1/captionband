@@ -1,0 +1,12 @@
+# Runs the same lint as CI (ruff check) on every commit, before the push.
+# Install once with:  pre-commit install
+#
+# Deliberately NOT ruff-format: the codebase predates it and a wholesale
+# reformat would drown real changes in style noise. If formatting is ever
+# adopted, do it as a single dedicated commit.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]

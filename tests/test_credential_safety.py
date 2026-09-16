@@ -11,7 +11,7 @@ If someone later removes or weakens `tests/conftest.py`, these fail.
 from __future__ import annotations
 
 import config as config_mod
-from config import AppConfig, SECRET_FIELDS, load_config, save_config
+from config import SECRET_FIELDS, AppConfig, load_config, save_config
 
 
 def test_keyring_is_disabled_for_the_whole_session():
@@ -30,7 +30,7 @@ def test_config_path_is_not_the_real_one(tmp_path):
     p = str(config_mod.config_path()).lower()
     assert "localappdata" not in p and "teamslivetranslation" not in p, (
         "config_path() aponta para o arquivo REAL do app durante os testes: "
-        "{}".format(p)
+        f"{p}"
     )
 
 
@@ -48,8 +48,8 @@ def test_saving_a_fake_secret_does_not_escape_the_sandbox():
     for field in SECRET_FIELDS:
         value = getattr(reloaded, field, "") or ""
         assert "k" == value or value == "", (
-            "campo {} voltou com {!r} — sinal de que o keyring real "
-            "participou".format(field, value[:8])
+            f"campo {field} voltou com {value[:8]!r} — sinal de que o keyring real "
+            "participou"
         )
 
 

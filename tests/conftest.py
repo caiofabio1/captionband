@@ -24,7 +24,33 @@ because there is no fixture to forget.
 """
 from __future__ import annotations
 
+import importlib.util
+
 import pytest
+
+
+def module_available(name: str) -> bool:
+    """True if an optional dependency can be imported (azure, openai, ...).
+
+    find_spec() raises ModuleNotFoundError when a PARENT package is missing
+    (e.g. querying 'azure.cognitiveservices.speech' with no 'azure' at all),
+    so callers must not use it bare.
+    """
+    try:
+        return importlib.util.find_spec(name) is not None
+    except ModuleNotFoundError:
+        return False
+
+
+HAS_AZURE = module_available("azure.cognitiveservices.speech")
+HAS_OPENAI = module_available("openai")
+
+requires_azure = pytest.mark.skipif(
+    not HAS_AZURE, reason="azure-cognitiveservices-speech não instalado",
+)
+requires_openai = pytest.mark.skipif(
+    not HAS_OPENAI, reason="pacote openai não instalado",
+)
 
 
 @pytest.fixture(autouse=True, scope="session")

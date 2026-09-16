@@ -34,19 +34,17 @@ import argparse
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import Optional
 
 from providers.base import (
     CODE_AUTH,
     CODE_NETWORK,
-    STATUS_FATAL,
     STATUS_FAILING,
+    STATUS_FATAL,
     ProviderCapabilities,
     ProviderStatus,
     TranslationEvent,
     TranslationProvider,
 )
-
 
 VERBOSE = False
 
@@ -88,7 +86,7 @@ class FakeChunkProvider(TranslationProvider):
     def is_running(self) -> bool:
         return self._running
 
-    def deliver(self, seq: Optional[int], text: str) -> None:
+    def deliver(self, seq: int | None, text: str) -> None:
         self.on_event(TranslationEvent(
             detected_language="pt",
             original_text=text,
@@ -118,11 +116,11 @@ class Collector:
     def on_caption(self, event) -> None:
         if getattr(event, "original_text", ""):
             self.captions.append(event.original_text)
-            vsay("caption -> {!r}".format(event.original_text))
+            vsay(f"caption -> {event.original_text!r}")
 
     def on_health(self, status: ProviderStatus) -> None:
         self.health.append((status.kind, status.code, status.message))
-        vsay("health  -> {}/{} {}".format(status.kind, status.code, status.message))
+        vsay(f"health  -> {status.kind}/{status.code} {status.message}")
 
     @property
     def trouble(self) -> list[tuple[str, str, str]]:
@@ -134,7 +132,7 @@ class Collector:
 
 def check_reordering() -> None:
     """1 + 2: out-of-order results are ordered; a lost one is skipped."""
-    from ordering import ReorderGate, DEFAULT_DEADLINE_S
+    from ordering import DEFAULT_DEADLINE_S, ReorderGate
 
     clock = {"t": 0.0}
     col = Collector()
@@ -152,7 +150,7 @@ def check_reordering() -> None:
 
     expected = ["primeira frase", "segunda frase", "terceira frase"]
     assert col.captions == expected, (
-        "legendas fora de ordem: {}".format(col.captions))
+        f"legendas fora de ordem: {col.captions}")
     say("  [OK] 1. resultados fora de ordem sao reordenados antes da tela")
 
     # Now one chunk is lost entirely (the API 500'd and we gave up on it).
@@ -180,7 +178,7 @@ def check_failure_is_loud() -> None:
     kind, code, message = col.trouble[-1]
     assert code == CODE_NETWORK, (kind, code)
     assert message, "status sem mensagem legivel"
-    say("  [OK] 3. falha de rede vira aviso legivel: {!r}".format(message[:52]))
+    say(f"  [OK] 3. falha de rede vira aviso legivel: {message[:52]!r}")
 
     col.health.clear()
     prov.report_exception(RuntimeError("HTTP 401 Unauthorized"), "transcription")
@@ -197,6 +195,7 @@ def check_fallback_fires() -> None:
     the wiring were still missing, which is precisely the bug we are fixing.
     """
     from PyQt6.QtWidgets import QApplication
+
     import translator as T
 
     app = QApplication.instance() or QApplication([])
@@ -242,8 +241,8 @@ def check_fallback_fires() -> None:
         ))
     app.processEvents()
     assert len(fired) == 1, (
-        "rajada de {} erros causou {} trocas de provedor; "
-        "deveria causar 1".format(10, len(fired)))
+        f"rajada de {10} erros causou {len(fired)} trocas de provedor; "
+        "deveria causar 1")
     say("  [OK] 4b. rajada de 10 erros = 1 troca de provedor (cooldown)")
 
 
@@ -267,7 +266,6 @@ def check_capture_death_detected() -> None:
 
 def check_streaming_bypasses_gate() -> None:
     """6: streaming providers must NOT be delayed by the reorder gate."""
-    from providers.base import ProviderCapabilities as PC
 
     chunk = FakeChunkProvider.capabilities()
     stream = FakeStreamProvider.capabilities()
@@ -275,7 +273,8 @@ def check_streaming_bypasses_gate() -> None:
     assert stream.ordered_by_protocol is True
 
     # The controller decides from capabilities, never from the provider name.
-    needs_gate = lambda caps: bool(caps is None or not caps.ordered_by_protocol)
+    def needs_gate(caps):
+        return bool(caps is None or not caps.ordered_by_protocol)
     assert needs_gate(chunk) is True
     assert needs_gate(stream) is False
     assert needs_gate(None) is True, "provider desconhecido deve receber o portao"
@@ -304,14 +303,14 @@ def main() -> int:
     say("Ensaio da pipeline - sem chave de API, sem Teams, sem dispositivo.\n")
     failed = []
     for name, fn in CHECKS:
-        say("* {}".format(name))
+        say(f"* {name}")
         try:
             fn()
         except AssertionError as exc:
-            say("  [FALHOU] {}".format(exc))
+            say(f"  [FALHOU] {exc}")
             failed.append(name)
         except Exception as exc:
-            say("  [ERRO] {}: {}".format(type(exc).__name__, exc))
+            say(f"  [ERRO] {type(exc).__name__}: {exc}")
             failed.append(name)
         say("")
 

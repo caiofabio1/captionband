@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # requirements-build.txt is the app's real dependency surface and
+          # covers everything the test suite imports — without the heavy
+          # developer extras of requirements.txt (faster-whisper/ctranslate2,
+          # argostranslate/stanza, google-cloud gRPC) that no test needs.
+          pip install -r requirements-build.txt
+          pip install ruff pytest pytest-qt
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Test
+        run: pytest -q
+
+  build:
+    # Publish the packaged app folder on every merge to main, so the operator
+    # (or anyone reporting a bug against main) can grab a binary without
+    # building locally. Mirrors build.bat's dedicated-venv approach.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Build with PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          python -m venv .venv-build
+          .venv-build\Scripts\python.exe -m pip install -r requirements-build.txt "pyinstaller>=6.0"
+          .venv-build\Scripts\pyinstaller.exe translator.spec --noconfirm
+
+      - name: Upload app folder
+        uses: actions/upload-artifact@v4
+        with:
+          name: CaptionBand-main
+          path: dist\CaptionBand
+          retention-days: 14

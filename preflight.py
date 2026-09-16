@@ -19,9 +19,8 @@ from __future__ import annotations
 import logging
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
-
 
 log = logging.getLogger(__name__)
 
@@ -45,14 +44,14 @@ class Step:
 
 def _fmt(step: Step) -> str:
     mark = "OK  " if step.ok else ("FALHA" if step.fatal else "AVISO")
-    return "[{}] {}: {}".format(mark, step.name, step.detail)
+    return f"[{mark}] {step.name}: {step.detail}"
 
 
 # ---------------------------------------------------------------- steps
 
 
 def check_provider_importable(cfg) -> Step:
-    from providers import provider_capabilities, PROVIDER_LABELS
+    from providers import PROVIDER_LABELS, provider_capabilities
 
     name = cfg.provider
     label = PROVIDER_LABELS.get(name, name)
@@ -60,13 +59,13 @@ def check_provider_importable(cfg) -> Step:
     if caps is None:
         return Step(
             "Provedor", False,
-            "'{}' não carrega neste Python (pacote ausente ou incompatível). "
-            "Abra Configurações e escolha outro, ou reinstale o pacote.".format(label),
+            f"'{label}' não carrega neste Python (pacote ausente ou incompatível). "
+            "Abra Configurações e escolha outro, ou reinstale o pacote.",
             fatal=True,
         )
     mode = "streaming (ordem garantida pelo protocolo)" if caps.ordered_by_protocol \
         else "em blocos (legenda reordenada pelo app)"
-    return Step("Provedor", True, "{} — {}".format(label, mode))
+    return Step("Provedor", True, f"{label} — {mode}")
 
 
 def check_credentials(cfg) -> Step:
@@ -99,10 +98,10 @@ def check_credentials(cfg) -> Step:
             )
         else:
             return Step("Credenciais", False,
-                        "Provedor desconhecido: {}".format(name), fatal=True)
+                        f"Provedor desconhecido: {name}", fatal=True)
     except Exception as exc:
         return Step("Credenciais", False,
-                    "Teste falhou: {}".format(exc), fatal=True)
+                    f"Teste falhou: {exc}", fatal=True)
     return Step("Credenciais", ok, msg, fatal=not ok)
 
 
@@ -122,13 +121,13 @@ def check_languages(cfg) -> Step:
     ]
     if overlap and len(targets) == 1:
         return Step("Idiomas", False,
-                    "O idioma-alvo ({}) é o mesmo da fala. A legenda vai sair "
-                    "no idioma original.".format(targets[0]))
+                    f"O idioma-alvo ({targets[0]}) é o mesmo da fala. A legenda vai sair "
+                    "no idioma original.")
     return Step("Idiomas", True,
                 "{} → {}".format(", ".join(sources) or "auto", ", ".join(targets)))
 
 
-def check_audio(cfg, on_progress: Optional[Callable[[str], None]] = None) -> Step:
+def check_audio(cfg, on_progress: Callable[[str], None] | None = None) -> Step:
     """Open the real capture path and listen for actual sound.
 
     This is the check the credential tests cannot replace: the most common
@@ -136,6 +135,7 @@ def check_audio(cfg, on_progress: Optional[Callable[[str], None]] = None) -> Ste
     exactly like nobody speaking.
     """
     import numpy as np
+
     from audio_capture import AudioCapture, find_device
 
     device = find_device(cfg.audio.device_name)
@@ -158,12 +158,12 @@ def check_audio(cfg, on_progress: Optional[Callable[[str], None]] = None) -> Ste
     try:
         cap.start()
     except Exception as exc:
-        return Step("Áudio", False, "Não foi possível abrir a captura: {}".format(exc),
+        return Step("Áudio", False, f"Não foi possível abrir a captura: {exc}",
                     fatal=True)
 
     if on_progress:
-        on_progress("ouvindo por {:.0f}s — toque um vídeo ou fale no Teams"
-                    .format(AUDIO_PROBE_S))
+        on_progress(f"ouvindo por {AUDIO_PROBE_S:.0f}s — toque um vídeo ou fale no Teams"
+                    )
     deadline = time.monotonic() + AUDIO_PROBE_S
     while time.monotonic() < deadline:
         if died or peak["rms"] > SILENCE_RMS:
@@ -176,16 +176,16 @@ def check_audio(cfg, on_progress: Optional[Callable[[str], None]] = None) -> Ste
     name = getattr(device, "name", None) or "dispositivo padrão"
     if peak["blocks"] == 0:
         return Step("Áudio", False,
-                    "Nenhum bloco de áudio chegou de '{}'. Confira o "
-                    "dispositivo de saída em Configurações.".format(name),
+                    f"Nenhum bloco de áudio chegou de '{name}'. Confira o "
+                    "dispositivo de saída em Configurações.",
                     fatal=True)
     if peak["rms"] <= SILENCE_RMS:
         # Not fatal: capture works, the machine was simply silent. But the
         # operator must be told, because this is indistinguishable from the
         # failure case until someone speaks.
         return Step("Áudio", False,
-                    "Captura funcionando em '{}', mas só silêncio digital. "
-                    "Toque um som e repita a checagem.".format(name))
+                    f"Captura funcionando em '{name}', mas só silêncio digital. "
+                    "Toque um som e repita a checagem.")
     return Step("Áudio", True,
                 "Som detectado em '{}' (nível {:.3f}).".format(name, peak["rms"]))
 
@@ -218,7 +218,7 @@ def check_fallback(cfg) -> Step:
     )
 
 
-def run(cfg, on_progress: Optional[Callable[[str], None]] = None) -> list[Step]:
+def run(cfg, on_progress: Callable[[str], None] | None = None) -> list[Step]:
     """Run every check in break-order. Never raises."""
     steps: list[Step] = []
 
@@ -243,7 +243,7 @@ def run(cfg, on_progress: Optional[Callable[[str], None]] = None) -> list[Step]:
         steps.append(check_audio(cfg, on_progress=note))
     except Exception as exc:
         log.exception("audio preflight crashed")
-        steps.append(Step("Áudio", False, "Checagem falhou: {}".format(exc), fatal=True))
+        steps.append(Step("Áudio", False, f"Checagem falhou: {exc}", fatal=True))
 
     return steps
 

@@ -22,9 +22,8 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
-
 
 log = logging.getLogger(__name__)
 
@@ -34,13 +33,13 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class TranslationEvent:
-    detected_language: Optional[str]
+    detected_language: str | None
     original_text: str
     translations: dict[str, str]
     is_final: bool
     # Monotonic ms when the source audio chunk was finalized/emitted by the
     # capture/buffer. Used by the overlay to compute end-to-end latency.
-    audio_emitted_at_ms: Optional[float] = None
+    audio_emitted_at_ms: float | None = None
     # Stable identifier shared by all events belonging to the same utterance.
     # Streaming providers (Azure recognizing → recognized) use this so the
     # overlay can replace partials in-place instead of stacking new lines.
@@ -51,7 +50,7 @@ class TranslationEvent:
     # result time). The controller's reorder gate releases events in this
     # order for providers whose results can overtake each other.
     # None ⇒ provider does not sequence (ordered_by_protocol providers).
-    seq: Optional[int] = None
+    seq: int | None = None
 
 
 # ---------------------------------------------------------------- status
@@ -101,7 +100,7 @@ def classify_exception(exc: BaseException) -> tuple[str, str]:
     (FAILING, UNKNOWN), which still reaches the operator. Silence is the only
     unacceptable outcome.
     """
-    text = "{}: {}".format(type(exc).__name__, exc).lower()
+    text = f"{type(exc).__name__}: {exc}".lower()
 
     # Order matters: 'quota exceeded' also contains '429' in some SDKs, and
     # quota is the more actionable diagnosis (switch provider, not wait).
@@ -167,7 +166,7 @@ class TranslationProvider(ABC):
 
     # Set by build_provider so status reports identify themselves.
     provider_name: str = ""
-    on_status: Optional[OnStatusCallback] = None
+    on_status: OnStatusCallback | None = None
 
     @classmethod
     def capabilities(cls) -> ProviderCapabilities:
@@ -204,7 +203,7 @@ class TranslationProvider(ABC):
         """Classify and emit an exception as status. Returns what was emitted."""
         kind, code = classify_exception(exc)
         log.error("provider error%s: %s",
-                  " ({})".format(context) if context else "", exc)
+                  f" ({context})" if context else "", exc)
         self.emit_status(kind, code)
         return ProviderStatus(kind=kind, code=code, provider=self.provider_name)
 

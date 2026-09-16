@@ -14,8 +14,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Optional
 
 from config import app_data_dir
 from constants import (
@@ -60,16 +60,23 @@ def _write_last_check() -> None:
 
 
 def _parse_version(tag: str) -> tuple[int, ...]:
-    """Convert 'v1.2.3' or '1.2.3' into (1, 2, 3) for comparison."""
+    """Convert 'v1.2.3' or '1.2.3' into (1, 2, 3) for comparison.
+
+    Always returns at least 3 components, zero-padded: tuple comparison in
+    Python is positional, so ('0', '6') < ('0', '6', '0') — a two-component
+    tag like 'v0.6' would otherwise be reported as an update over 0.6.0.
+    """
     s = tag.lstrip("v").lstrip("V").strip()
     parts = []
     for p in s.split("."):
         digits = "".join(c for c in p if c.isdigit())
         parts.append(int(digits) if digits else 0)
+    while len(parts) < 3:
+        parts.append(0)
     return tuple(parts)
 
 
-def _fetch_latest_release() -> Optional[ReleaseInfo]:
+def _fetch_latest_release() -> ReleaseInfo | None:
     url = f"https://api.github.com/repos/{APP_GITHUB_REPO}/releases/latest"
     req = urllib.request.Request(
         url,
@@ -99,7 +106,7 @@ def _fetch_latest_release() -> Optional[ReleaseInfo]:
         return None
 
 
-def check_for_update_async(on_result: Callable[[Optional[ReleaseInfo]], None]) -> None:
+def check_for_update_async(on_result: Callable[[ReleaseInfo | None], None]) -> None:
     """Run the update check in a background daemon thread.
 
     Calls on_result(release_info) on the calling thread's event loop ONLY

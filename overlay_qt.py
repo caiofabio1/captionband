@@ -26,23 +26,19 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
 
-from PyQt6.QtCore import Qt, QPoint, pyqtSignal, QTimer
+from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
     QFont,
     QFontMetrics,
-    QPainter,
-    QPainterPath,
-    QPen,
     QGuiApplication,
     QMouseEvent,
+    QPainter,
 )
-from PyQt6.QtWidgets import QWidget, QApplication, QPushButton
+from PyQt6.QtWidgets import QApplication, QPushButton, QWidget
 
-from config import OverlayConfig, AppConfig
-
+from config import AppConfig, OverlayConfig
 
 log = logging.getLogger(__name__)
 
@@ -60,7 +56,7 @@ LANGUAGE_COLORS = {
 }
 
 
-def _color_for_language(lang: Optional[str]) -> Optional[str]:
+def _color_for_language(lang: str | None) -> str | None:
     if not lang:
         return None
     code = lang.lower().split("-")[0].split("_")[0]
@@ -80,11 +76,11 @@ class Utterance:
     """One logical caption line in the rolling history."""
     original: str
     translations: dict[str, str] = field(default_factory=dict)
-    detected_language: Optional[str] = None
+    detected_language: str | None = None
     created_at_ms: float = 0.0
     updated_at_ms: float = 0.0
     is_final: bool = False
-    audio_emitted_at_ms: Optional[float] = None
+    audio_emitted_at_ms: float | None = None
     # Stable utterance ID from streaming providers (Azure recognizing →
     # recognized share the same result_id). Used to replace partials in-place
     # rather than appending a new line. Empty for chunk-final providers.
@@ -93,7 +89,7 @@ class Utterance:
     def primary_translation(self, primary_lang: str) -> str:
         return self.translations.get(primary_lang, "") if primary_lang else ""
 
-    def language_color(self) -> Optional[str]:
+    def language_color(self) -> str | None:
         return _color_for_language(self.detected_language)
 
 
@@ -116,7 +112,7 @@ class CaptionOverlay(QWidget):
     IDLE_CLEAR_MS = 20000          # clear all when no events for this long
     ANIM_DURATION_MS = 280         # fade + slide duration when caption changes
 
-    def __init__(self, app_config: AppConfig, parent: Optional[QWidget] = None):
+    def __init__(self, app_config: AppConfig, parent: QWidget | None = None):
         super().__init__(parent)
         self.app_config = app_config
         self.overlay_config: OverlayConfig = app_config.overlay
@@ -132,7 +128,7 @@ class CaptionOverlay(QWidget):
 
         # Animation state
         self._anim_started_ms: float = 0.0
-        self._last_latency_ms: Optional[float] = None
+        self._last_latency_ms: float | None = None
         self._anim_timer = QTimer(self)
         self._anim_timer.setInterval(33)  # ~30fps
         self._anim_timer.timeout.connect(self._tick_animation)
@@ -305,9 +301,9 @@ class CaptionOverlay(QWidget):
         self,
         original: str,
         translations: dict[str, str],
-        detected_language: Optional[str] = None,
+        detected_language: str | None = None,
         is_final: bool = True,
-        audio_emitted_at_ms: Optional[float] = None,
+        audio_emitted_at_ms: float | None = None,
         result_id: str = "",
     ) -> None:
         """Thread-safe entry point used by background threads (provider callbacks)."""
@@ -596,14 +592,14 @@ class CaptionOverlay(QWidget):
 
     # ------------------------------------------------------------------ rendering
 
-    def _compose_lines_with_lang(self) -> list[tuple[bool, str, float, Optional[str]]]:
+    def _compose_lines_with_lang(self) -> list[tuple[bool, str, float, str | None]]:
         """Like _compose_lines but each tuple has language color at the end."""
-        out: list[tuple[bool, str, float, Optional[str]]] = []
+        out: list[tuple[bool, str, float, str | None]] = []
         for is_primary, text, alpha, lang_color in self._compose_lines_internal():
             out.append((is_primary, text, alpha, lang_color))
         return out
 
-    def _compose_lines_internal(self) -> list[tuple[bool, str, float, Optional[str]]]:
+    def _compose_lines_internal(self) -> list[tuple[bool, str, float, str | None]]:
         """Returns list of (is_primary, text, alpha, lang_color) tuples in render order
         (top to bottom). Alpha 0..1 controls dimming for older lines.
 
@@ -619,7 +615,7 @@ class CaptionOverlay(QWidget):
         targets = self.app_config.target_languages
         primary_lang = targets[0] if targets else ""
 
-        lines: list[tuple[bool, str, float, Optional[str]]] = []
+        lines: list[tuple[bool, str, float, str | None]] = []
         n = len(self._history)
         for i, utt in enumerate(self._history):
             is_current = i == n - 1
@@ -934,7 +930,6 @@ class CaptionOverlay(QWidget):
 
 def _demo() -> None:  # pragma: no cover
     import sys
-    import time
 
     app = QApplication(sys.argv)
     cfg = AppConfig()
@@ -952,8 +947,8 @@ def _demo() -> None:  # pragma: no cover
     idx = [0]
     def tick():
         if idx[0] < len(seq):
-            o, t, l, f = seq[idx[0]]
-            overlay.push_caption(o, t, l, f)
+            orig, trans, lang, fin = seq[idx[0]]
+            overlay.push_caption(orig, trans, lang, fin)
             idx[0] += 1
     timer.timeout.connect(tick)
     timer.start(2500)

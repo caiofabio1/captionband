@@ -28,7 +28,6 @@ import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional
 
 from .base import (
     OnTranslationCallback,
@@ -36,7 +35,6 @@ from .base import (
     TranslationEvent,
     TranslationProvider,
 )
-
 
 log = logging.getLogger(__name__)
 
@@ -80,12 +78,12 @@ class GoogleProvider(TranslationProvider):
         self.on_event = on_event
         self.samplerate = samplerate
 
-        self._audio_queue: "queue.Queue[Optional[bytes]]" = queue.Queue(maxsize=400)
-        self._thread: Optional[threading.Thread] = None
-        self._translation_pool: Optional[ThreadPoolExecutor] = None
+        self._audio_queue: queue.Queue[bytes | None] = queue.Queue(maxsize=400)
+        self._thread: threading.Thread | None = None
+        self._translation_pool: ThreadPoolExecutor | None = None
         self._lock = threading.Lock()
         self._running = False
-        self._creds_temp_path: Optional[str] = None
+        self._creds_temp_path: str | None = None
         self._speech_client = None
         self._translate_client = None
 
@@ -96,7 +94,7 @@ class GoogleProvider(TranslationProvider):
         try:
             json.loads(self.credentials_json)
         except Exception as exc:
-            raise ValueError(f"credentials_json is neither a path nor valid JSON: {exc}")
+            raise ValueError(f"credentials_json is neither a path nor valid JSON: {exc}") from exc
         fd, path = tempfile.mkstemp(suffix=".json", prefix="tlt-google-")
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(self.credentials_json)
@@ -186,7 +184,7 @@ class GoogleProvider(TranslationProvider):
                 sample_rate_hertz=self.samplerate,
                 audio_channel_count=1,
             ),
-            language_codes=[primary] + alternates,
+            language_codes=[primary, *alternates],
             model="latest_long",
             features=speech_types.RecognitionFeatures(
                 enable_automatic_punctuation=True,
@@ -298,7 +296,7 @@ class GoogleProvider(TranslationProvider):
         common = {".", "..", "...", "you", "thank you.", "thanks.", "bye."}
         return text.strip().lower() in common
 
-    def _translate_and_emit(self, transcript: str, detected: Optional[str]) -> None:
+    def _translate_and_emit(self, transcript: str, detected: str | None) -> None:
         try:
             t0 = time.time()
             translations = self._translate_all(transcript, detected)
@@ -315,7 +313,7 @@ class GoogleProvider(TranslationProvider):
             log.exception("google translation worker crashed")
             self.report_exception(exc, "translation worker")
 
-    def _translate_all(self, text: str, source_lang: Optional[str]) -> dict[str, str]:
+    def _translate_all(self, text: str, source_lang: str | None) -> dict[str, str]:
         out: dict[str, str] = {}
         if self._translate_client is None:
             return out
@@ -337,7 +335,7 @@ class GoogleProvider(TranslationProvider):
                     return tgt, resp.translations[0].translated_text
             except Exception as exc:
                 log.exception("google translate failed for target=%s", tgt)
-                self.report_exception(exc, "translate->{}".format(tgt))
+                self.report_exception(exc, f"translate->{tgt}")
             return tgt, ""
 
         if len(self.target_languages) == 1:

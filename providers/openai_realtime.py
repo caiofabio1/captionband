@@ -44,7 +44,6 @@ import json
 import logging
 import threading
 import time
-from typing import Optional
 
 import numpy as np
 
@@ -60,7 +59,6 @@ from .base import (
     TranslationEvent,
     TranslationProvider,
 )
-
 
 log = logging.getLogger(__name__)
 
@@ -100,14 +98,14 @@ def _resample_to_24k(pcm16: bytes, src_rate: int) -> bytes:
         return b""
 
     try:
-        from scipy.signal import resample_poly
-
         from math import gcd
+
+        from scipy.signal import resample_poly
         g = gcd(TARGET_SAMPLERATE, src_rate)
         out = resample_poly(samples.astype(np.float32),
                             TARGET_SAMPLERATE // g, src_rate // g)
     except Exception:
-        n_out = int(round(samples.size * TARGET_SAMPLERATE / src_rate))
+        n_out = round(samples.size * TARGET_SAMPLERATE / src_rate)
         out = np.interp(
             np.linspace(0.0, samples.size - 1, n_out, dtype=np.float64),
             np.arange(samples.size, dtype=np.float64),
@@ -134,8 +132,8 @@ class _TranslationSession:
         self.safety_identifier = safety_identifier or "teams-live-translation"
 
         self._ws = None
-        self._thread: Optional[threading.Thread] = None
-        self._finaliser: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
+        self._finaliser: threading.Thread | None = None
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._connected = threading.Event()
@@ -151,12 +149,12 @@ class _TranslationSession:
     def start(self) -> None:
         self._stop.clear()
         self._thread = threading.Thread(
-            target=self._run, name="oai-rt-{}".format(self.target), daemon=True
+            target=self._run, name=f"oai-rt-{self.target}", daemon=True
         )
         self._thread.start()
         self._finaliser = threading.Thread(
             target=self._finalise_loop,
-            name="oai-rt-fin-{}".format(self.target),
+            name=f"oai-rt-fin-{self.target}",
             daemon=True,
         )
         self._finaliser.start()
@@ -210,8 +208,8 @@ class _TranslationSession:
                 ws = websocket.create_connection(
                     REALTIME_URL,
                     header=[
-                        "Authorization: Bearer {}".format(self.api_key),
-                        "OpenAI-Safety-Identifier: {}".format(self.safety_identifier),
+                        f"Authorization: Bearer {self.api_key}",
+                        f"OpenAI-Safety-Identifier: {self.safety_identifier}",
                     ],
                     timeout=10,
                 )
@@ -280,7 +278,7 @@ class _TranslationSession:
 
         if etype == "error" or etype.endswith(".error"):
             detail = event.get("error") or event
-            self.on_error("API: {}".format(detail))
+            self.on_error(f"API: {detail}")
             return
 
         # Forward-compatible: the published docs list no completion event, so
@@ -300,7 +298,7 @@ class _TranslationSession:
         with self._lock:
             src = self._src_buf.strip()
             out = self._out_buf.strip()
-            rid = "{}:{}".format(self.target, self._utterance_id)
+            rid = f"{self.target}:{self._utterance_id}"
         if not src and not out:
             return
         self.on_text(self.target, src, out, final, rid)
@@ -350,7 +348,7 @@ class OpenAIRealtimeProvider(TranslationProvider):
         api_key: str,
         target_languages: list[str],
         on_event: OnTranslationCallback,
-        source_languages: Optional[list[str]] = None,
+        source_languages: list[str] | None = None,
         samplerate: int = 16_000,
         safety_identifier: str = "",
     ):
@@ -411,9 +409,8 @@ class OpenAIRealtimeProvider(TranslationProvider):
             self.emit_status(
                 STATUS_DEGRADED,
                 CODE_UNKNOWN,
-                "{} idiomas = {} sessões simultâneas neste provedor; o custo "
-                "por hora multiplica.".format(
-                    len(self._sessions), len(self._sessions)),
+                f"{len(self._sessions)} idiomas = {len(self._sessions)} sessões simultâneas neste provedor; o custo "
+                "por hora multiplica.",
             )
 
     def stop(self) -> None:
