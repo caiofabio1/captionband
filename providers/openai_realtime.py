@@ -84,34 +84,76 @@ TICK_S = 0.2
 RECONNECT_DELAYS_S = (1, 2, 5, 10)
 
 
-def _resample_to_24k(pcm16: bytes, src_rate: int) -> bytes:
-    """Resample mono PCM16 to 24 kHz.
+def _resample_array(samples: np.ndarray, src_rate: int) -> np.ndarray:
+    """One-shot polyphase resample of an int16 array to 24 kHz (float out).
 
-    Uses scipy's polyphase filter when available (16k→24k is an exact 3:2
-    ratio, so it is cheap and clean); falls back to linear interpolation,
-    which is audibly worse but still far better than sending the wrong rate.
+    scipy when available (16k→24k is an exact 3:2 ratio, so it is cheap and
+    clean); falls back to linear interpolation, which is audibly worse but
+    still far better than sending the wrong rate.
     """
-    if src_rate == TARGET_SAMPLERATE:
-        return pcm16
-    samples = np.frombuffer(pcm16, dtype=np.int16)
-    if samples.size == 0:
-        return b""
-
     try:
         from math import gcd
 
         from scipy.signal import resample_poly
         g = gcd(TARGET_SAMPLERATE, src_rate)
-        out = resample_poly(samples.astype(np.float32),
-                            TARGET_SAMPLERATE // g, src_rate // g)
+        return resample_poly(samples.astype(np.float32),
+                             TARGET_SAMPLERATE // g, src_rate // g)
     except Exception:
         n_out = round(samples.size * TARGET_SAMPLERATE / src_rate)
-        out = np.interp(
+        return np.interp(
             np.linspace(0.0, samples.size - 1, n_out, dtype=np.float64),
             np.arange(samples.size, dtype=np.float64),
             samples.astype(np.float64),
         )
-    return np.clip(out, -32768, 32767).astype(np.int16).tobytes()
+
+
+class _StreamResampler:
+    """Stateful mono PCM16 resampler for a continuous audio stream.
+
+    Resampling each 50 ms block in isolation redesigns the FIR filter for
+    every block and applies its edge transient to BOTH ends of every block —
+    audible boundary clicks that degrade recognition. Carrying the tail of
+    the previous block into the next call lets the filter see the same
+    continuous signal it would see in a one-shot resample, and the carry
+    buffer is reused instead of allocating three temporaries per block.
+    """
+
+    # Input samples carried across blocks. resample_poly's default FIR for
+    # 3:2 is ~60 taps, so 32 samples of history covers its one-sided tail.
+    CARRY_SAMPLES = 32
+
+    def __init__(self, src_rate: int):
+        self.src_rate = src_rate
+        self._carry = np.zeros(0, dtype=np.int16)
+
+    def process(self, pcm16: bytes) -> bytes:
+        if self.src_rate == TARGET_SAMPLERATE:
+            return pcm16
+        samples = np.frombuffer(pcm16, dtype=np.int16)
+        if samples.size == 0:
+            return b""
+        joined = np.concatenate([self._carry, samples])
+        out = _resample_array(joined, self.src_rate)
+        # Drop the outputs that correspond to the carried tail — they were
+        # already emitted with the previous block. The first surviving
+        # outputs still benefit from the filter history, which is the whole
+        # point: no edge transient at the seam.
+        skip = round(self._carry.size * TARGET_SAMPLERATE / self.src_rate)
+        self._carry = joined[-self.CARRY_SAMPLES:].copy()
+        out = out[skip:]
+        return np.clip(out, -32768, 32767).astype(np.int16).tobytes()
+
+
+def _resample_to_24k(pcm16: bytes, src_rate: int) -> bytes:
+    """One-shot resample of mono PCM16 to 24 kHz.
+
+    Correct for isolated buffers (tests, tools). The provider's live audio
+    path uses _StreamResampler instead, which keeps filter state across
+    blocks — see its docstring.
+    """
+    if src_rate == TARGET_SAMPLERATE:
+        return pcm16
+    return _StreamResampler(src_rate).process(pcm16)
 
 
 class _TranslationSession:
@@ -370,6 +412,13 @@ class OpenAIRealtimeProvider(TranslationProvider):
         self._lock = threading.Lock()
         self._running = False
         self._reported_cost_hint = False
+        # Stateful resampler: per-block resampling put an FIR edge transient
+        # on every 50 ms boundary (audible clicks, worse recognition).
+        self._resampler: _StreamResampler | None = None
+        # Monotonic ms of the last audio block we received. Stamped at
+        # push_audio time — NOT at result time, which made the overlay's
+        # end-to-end latency read ~0 for this provider.
+        self._last_audio_at_ms = 0.0
 
     # -- lifecycle ------------------------------------------------------
 
@@ -397,6 +446,8 @@ class OpenAIRealtimeProvider(TranslationProvider):
             ]
             for s in self._sessions:
                 s.start()
+            self._resampler = _StreamResampler(self.samplerate)
+            self._last_audio_at_ms = 0.0
             self._running = True
             log.info("openai realtime provider started: targets=%s (%d sessions)",
                      self.target_languages, len(self._sessions))
@@ -423,15 +474,25 @@ class OpenAIRealtimeProvider(TranslationProvider):
                 except Exception:
                     log.exception("error stopping session %s", s.target)
             self._sessions = []
+            self._resampler = None
+            self._last_audio_at_ms = 0.0
             self._running = False
             log.info("openai realtime provider stopped")
 
     def push_audio(self, audio_bytes: bytes) -> None:
         if not self._running or not audio_bytes:
             return
-        # Resample ONCE for all sessions rather than per session.
+        # Stamp arrival NOW: results come back seconds later, and the
+        # overlay's latency metric measures audio-arrival → caption-out.
+        self._last_audio_at_ms = time.monotonic() * 1000
+        # Resample ONCE for all sessions rather than per session, through the
+        # stateful stream resampler (no FIR edge transient per block).
+        resampler = self._resampler
         try:
-            pcm24 = _resample_to_24k(audio_bytes, self.samplerate)
+            if resampler is not None:
+                pcm24 = resampler.process(audio_bytes)
+            else:
+                pcm24 = _resample_to_24k(audio_bytes, self.samplerate)
         except Exception as exc:
             self.report_exception(exc, "resample")
             return
@@ -459,7 +520,7 @@ class OpenAIRealtimeProvider(TranslationProvider):
             original_text=source_text,
             translations={target: translated_text} if translated_text else {},
             is_final=final,
-            audio_emitted_at_ms=time.monotonic() * 1000,
+            audio_emitted_at_ms=self._last_audio_at_ms or None,
             # Stable per (target, utterance): lets the overlay REPLACE the
             # partial in place instead of stacking a new line per delta.
             result_id=result_id,
