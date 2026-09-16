@@ -8,10 +8,14 @@ on:
 jobs:
   test:
     runs-on: windows-latest
+    # Qt tests on Windows can hang; never let a job burn a runner for hours.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+        # Matches pyproject.toml requires-python = ">=3.11,<3.14" and
+        # build.bat (3.11 floor). No 3.14: not declared, not shipped.
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
@@ -30,13 +34,36 @@ jobs:
           # developer extras of requirements.txt (faster-whisper/ctranslate2,
           # argostranslate/stanza, google-cloud gRPC) that no test needs.
           pip install -r requirements-build.txt
-          pip install ruff pytest pytest-qt
+          # ruff/pytest/pytest-qt pinned in requirements-dev.txt; ruff is the
+          # SAME version as .pre-commit-config.yaml so local and CI agree.
+          pip install -r requirements-dev.txt
 
       - name: Lint
         run: ruff check .
 
       - name: Test
-        run: pytest -q
+        # No -q: pyproject addopts already sets -v --tb=short; passing -q
+        # here made CI output differ from every local run.
+        shell: bash
+        # On failure, mirror the tail of the pytest output into workflow
+        # error annotations — readable from the check-run annotations API
+        # without auth. A red "exit code 1" on a headless runner is
+        # undebuggable otherwise.
+        run: |
+          set -o pipefail
+          if pytest 2>&1 | tee pytest.log; then
+            exit 0
+          fi
+          echo "PYTEST FAILED; tail of the output follows as annotations"
+          tail -n 80 pytest.log | while IFS= read -r line; do
+            echo "::error title=pytest::${line}"
+          done
+          exit 1
+
+      - name: Rehearsal harness
+        # Asserts against the real TranslationController without an API key
+        # or audio device. It used to rot silently because nothing ran it.
+        run: python rehearsal.py
 
   build:
     # Publish the packaged app folder on every merge to main, so the operator
@@ -45,6 +72,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
     runs-on: windows-latest
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
@@ -59,12 +87,47 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m venv .venv-build
-          .venv-build\Scripts\python.exe -m pip install -r requirements-build.txt "pyinstaller>=6.0"
+          # Exact pins from the lock when present — reproducible builds.
+          if (Test-Path requirements-build.lock) {
+            .venv-build\Scripts\python.exe -m pip install -r requirements-build.lock
+          } else {
+            .venv-build\Scripts\python.exe -m pip install -r requirements-build.txt
+          }
+          .venv-build\Scripts\python.exe -m pip install "pyinstaller>=6.0"
           .venv-build\Scripts\pyinstaller.exe translator.spec --noconfirm
+
+      - name: Smoke test frozen exe
+        # translator.py handles --version by printing APP_VERSION and exiting
+        # 0 BEFORE any QApplication is created — safe on a headless runner.
+        # One-dir build (see translator.spec), so the exe lives inside the
+        # dist\CaptionBand folder.
+        shell: pwsh
+        run: |
+          & dist\CaptionBand\CaptionBand.exe --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Install Inno Setup
+        run: winget install --id JRSoftware.InnoSetup -e --silent --accept-source-agreements --accept-package-agreements
+
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found after winget install" }
+          & $iscc /Q installer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload app folder
         uses: actions/upload-artifact@v4
         with:
           name: CaptionBand-main
           path: dist\CaptionBand
+          retention-days: 14
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: CaptionBandSetup-main
+          path: Output\CaptionBandSetup.exe
           retention-days: 14
