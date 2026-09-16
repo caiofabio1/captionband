@@ -207,8 +207,11 @@ class TranslationController(QObject):
     # callback silently never runs.
     _fallback_requested = pyqtSignal()
     _capture_lost = pyqtSignal(str)
-    # (ok, new_cfg, provider, error) from the provider-swap worker thread.
-    _swap_result = pyqtSignal(bool, object, object, str)
+    # (ok, new_cfg, provider, error, generation) from the provider-swap worker
+    # thread. The generation token is how a result from a swap that stop() —
+    # or a NEWER swap — already superseded is recognised and dropped instead
+    # of being installed on top of the current provider.
+    _swap_result = pyqtSignal(bool, object, object, str, int)
     # Public: the operator-initiated source-language change finished.
     # (ok, message). Emitted on the GUI thread.
     source_mode_changed = pyqtSignal(bool, str)
@@ -237,6 +240,14 @@ class TranslationController(QObject):
     # — routine at a live event — and the device is back within seconds.
     # Giving up leaves a CONSISTENT state (stopped), so "Iniciar" works again.
     CAPTURE_RETRY_DELAYS_S = (2.0, 5.0, 10.0)
+
+    # A provider swap whose start() failed leaves the controller with NO
+    # provider at all (_translator is None from the moment the swap began).
+    # The only other recovery is the 45 s result-stall watchdog — nearly a
+    # minute of mute captions for what is usually a transient network error.
+    # Retry the swap on this short backoff first; if the budget is exhausted
+    # the failure escalates to the fallback chain.
+    SWAP_RETRY_DELAYS_S = (2.0, 5.0, 10.0)
 
     # Audio is arriving with real speech in it, but NO result has come back for
     # this long. Provider-agnostic: it does not care whether the socket
@@ -281,6 +292,16 @@ class TranslationController(QObject):
         # provider that is now live.
         self._event_token: object = object()
         self._swap_in_progress = False
+        # Generation token for provider swaps. Bumped on every
+        # _swap_provider_async AND on stop(); the swap worker carries the
+        # value it started with, and _on_swap_result discards any result
+        # whose generation has moved on. Without it, a worker finishing
+        # after stop()+start() installed the OLD provider over the new one —
+        # the new session kept billing with nothing able to stop it, and
+        # self.config was silently reverted underneath it.
+        self._swap_gen = 0
+        # Index into SWAP_RETRY_DELAYS_S for the failed-swap retry backoff.
+        self._swap_retry = 0
         # Last source-mode the operator asked for while a swap was running.
         # Requests used to be dropped on the floor in that window.
         self._pending_source_mode: AppConfig | None = None
@@ -326,7 +347,17 @@ class TranslationController(QObject):
 
     def trigger_fallback(self) -> bool:
         """Switch to the next provider in fallback_providers that is valid
-        and hasn't been tried this session. Returns True on switch."""
+        and hasn't been tried this session. Returns True if a switch was
+        STARTED.
+
+        The swap runs on a worker thread: stopping and starting a cloud
+        recognizer is 1.3–1.6 s of blocking network I/O (measured in a real
+        session's log), and this method is called on the GUI thread, where
+        that freeze reads as "the app hung". The outcome arrives via
+        _on_swap_result; _fallback_in_progress stays set until then so a
+        burst of failure statuses does not queue a second switch behind the
+        first.
+        """
         from dataclasses import replace
         candidates = [p for p in self.config.fallback_providers if p != self.config.provider]
         for cand in candidates:
@@ -338,18 +369,17 @@ class TranslationController(QObject):
             old = self.config.provider
             log.warning("triggering provider fallback: %s -> %s", old, cand)
             self._tried_fallbacks.add(old)
+            # Mark the candidate NOW, not only after a failed start: the swap
+            # is async, and while it runs every further failure status would
+            # otherwise re-pick this same candidate.
+            self._tried_fallbacks.add(cand)
+            self._fallback_in_progress = True
             # Swap ONLY the provider. stop()/start() would close the
             # transcript and open a second file for the same talk, and flash
             # the tray stopped→running in the middle of a failure.
-            if self._swap_provider(test_cfg):
-                self.provider_changed.emit(old, cand)
-                return True
-            log.error("fallback provider %s also failed to start", cand)
-            # Mark the FAILED candidate as tried too. Without this, only the
-            # provider we switched AWAY from is recorded, so a candidate that
-            # cannot start gets retried on every later fallback — burning the
-            # cooldown on a door we know is shut.
-            self._tried_fallbacks.add(cand)
+            self._swap_provider_async(test_cfg)
+            self.provider_changed.emit(old, cand)
+            return True
         return False
 
     def is_running(self) -> bool:
@@ -449,6 +479,8 @@ class TranslationController(QObject):
     def _swap_provider_async(self, new_cfg: AppConfig) -> None:
         """Same contract as _swap_provider, but the blocking part runs on a
         worker thread; _on_swap_result finishes the job on the GUI thread."""
+        self._swap_gen += 1
+        gen = self._swap_gen
         self._swap_in_progress = True
         old, self._translator = self._translator, None   # audio drops meanwhile
         on_event, on_status = self._bind_provider_callbacks()
@@ -464,15 +496,29 @@ class TranslationController(QObject):
                 provider.start()
             except Exception as exc:
                 log.exception("provider swap failed")
-                self._swap_result.emit(False, new_cfg, None, str(exc))
+                self._swap_result.emit(False, new_cfg, None, str(exc), gen)
                 return
-            self._swap_result.emit(True, new_cfg, provider, "")
+            self._swap_result.emit(True, new_cfg, provider, "", gen)
 
         threading.Thread(target=worker, name="provider-swap", daemon=True).start()
 
-    def _on_swap_result(self, ok: bool, new_cfg: object, provider: object, error: str) -> None:
+    def _on_swap_result(self, ok: bool, new_cfg: object, provider: object,
+                        error: str, gen: int) -> None:
         """GUI thread. Install the new provider (or report the failure)."""
         import time as _t
+        # A result from a swap that stop() — or a NEWER swap — already
+        # superseded must never be installed: its provider would sit live and
+        # billing on a controller that has moved on, and self.config would be
+        # reverted underneath the provider that replaced it.
+        if gen != self._swap_gen:
+            log.info("discarding a stale swap result (gen %d, current %d)",
+                     gen, self._swap_gen)
+            if ok and provider is not None:
+                try:
+                    provider.stop()
+                except Exception:
+                    log.exception("error stopping provider orphaned by a stale swap")
+            return
         self._swap_in_progress = False
         assert isinstance(new_cfg, AppConfig)
         if not ok or provider is None:
@@ -480,9 +526,22 @@ class TranslationController(QObject):
             self._set_health(STATUS_FATAL, "", msg)
             self._pending_source_mode = None
             self.source_mode_changed.emit(False, msg)
-            # The result-stall watchdog will retry the CURRENT config; nothing
-            # else to do here.
+            was_fallback = self._fallback_in_progress
+            self._fallback_in_progress = False
+            if was_fallback and self._running:
+                # The fallback candidate would not start either. It is already
+                # marked as tried, so the chain walks on to the next candidate
+                # — or stops the pipeline if none remain.
+                log.error("fallback provider %s failed to start", new_cfg.provider)
+                self._attempt_fallback(_force=True)
+                return
+            # The controller now has NO provider (_swap_provider_async zeroed
+            # it before the worker ran). Retry on a short backoff instead of
+            # waiting mute for the 45 s stall watchdog.
+            self._schedule_swap_retry(new_cfg)
             return
+        self._swap_retry = 0
+        self._fallback_in_progress = False
         # The swap ran on a worker while the GUI stayed live, so the operator
         # may have pressed "Parar" (or quit) in the meantime. Installing here
         # would attach a LIVE, already-started provider to a stopped
@@ -508,6 +567,34 @@ class TranslationController(QObject):
         if pending is not None and self._running:
             log.info("applying the source mode queued during the swap")
             self._swap_provider_async(pending)
+
+    def _schedule_swap_retry(self, new_cfg: AppConfig) -> None:
+        """Re-run a failed provider swap on a short backoff.
+
+        A failed swap leaves _translator None — captions dead — and the only
+        other recovery was the 45 s result-stall watchdog, nearly a minute of
+        silence mid-event for what is usually a transient network error.
+        """
+        if not self._running:
+            return
+        if self._swap_retry >= len(self.SWAP_RETRY_DELAYS_S):
+            log.error("provider start retry budget exhausted; escalating to "
+                      "the fallback chain")
+            self._swap_retry = 0
+            self._fallback_requested.emit()
+            return
+        delay = self.SWAP_RETRY_DELAYS_S[self._swap_retry]
+        self._swap_retry += 1
+        log.warning("retrying the provider start in %.0fs (attempt %d/%d)",
+                    delay, self._swap_retry, len(self.SWAP_RETRY_DELAYS_S))
+        QTimer.singleShot(int(delay * 1000), lambda: self._retry_swap(new_cfg))
+
+    def _retry_swap(self, new_cfg: AppConfig) -> None:
+        """GUI thread, fired by the backoff timer from _schedule_swap_retry."""
+        if not self._running or self._swap_in_progress:
+            return
+        log.info("retrying the provider swap now")
+        self._swap_provider_async(new_cfg)
 
     def _install_provider(self, new_cfg: AppConfig, provider: TranslationProvider) -> None:
         caps = provider_capabilities(new_cfg.provider)
@@ -583,7 +670,15 @@ class TranslationController(QObject):
         self._translator = build_provider(
             self.config, on_event=on_event, on_status=on_status,
         )
-        self._translator.start()
+        try:
+            self._translator.start()
+        except Exception:
+            # Never keep a reference to a provider that failed to start:
+            # stop() would later call provider.stop() on it as if it were a
+            # live session, and its callbacks share this session's event
+            # token.
+            self._translator = None
+            raise
 
         try:
             self._capture = self._build_capture(device)
@@ -592,7 +687,8 @@ class TranslationController(QObject):
             # Don't leave a provider session running (and billing) with no
             # audio behind a "failed to start" dialog.
             try:
-                self._translator.stop()
+                if self._translator is not None:
+                    self._translator.stop()
             finally:
                 self._translator = None
             raise
@@ -618,6 +714,7 @@ class TranslationController(QObject):
         self._last_speech_at = 0.0
         self._stall_recoveries = 0
         self._last_stall_recovery_at = 0.0
+        self._swap_retry = 0
         self._running = True
         self._set_health(STATUS_OK, "", "")
         if transcript_failed:
@@ -675,14 +772,23 @@ class TranslationController(QObject):
         self._tick_timer.stop()
         # Anything still in flight from this session is now stale.
         self._event_token = object()
+        # ...including any swap worker that has not reported back yet: its
+        # result carries the generation it started with, and stop() just
+        # moved the generation on.
+        self._swap_gen += 1
         # A manual stop is a fresh start for the fallback chain: otherwise a
         # provider tried an hour ago stays "burned" for the rest of the day.
         self._tried_fallbacks.clear()
-        self._failure_timestamps.clear()
+        # record_failure() appends under _state_lock from provider worker
+        # threads; the clear must hold the same lock.
+        with self._state_lock:
+            self._failure_timestamps.clear()
         # ...and so is the cooldown. Leaving it set meant a stop/start inside
         # FALLBACK_COOLDOWN_S silently swallowed the new session's first
         # fallback — precisely when the operator had just restarted to recover.
         self._last_fallback_at = 0.0
+        self._fallback_in_progress = False
+        self._swap_retry = 0
         # A swap worker may never report back (it is a bare daemon thread).
         # This flag was only ever cleared in _on_swap_result, so one lost
         # worker disabled language switching AND the stall watchdog for the
@@ -851,33 +957,42 @@ class TranslationController(QObject):
             # rebuilds the whole pipeline, which touches Qt objects.
             self._fallback_requested.emit()
 
-    def _attempt_fallback(self) -> None:
+    def _attempt_fallback(self, _force: bool = False) -> None:
         """Switch providers at most once per cooldown window.
 
         Runs on the GUI thread. Several fallback requests can already be
         queued behind this one by the time it executes — that is the normal
         shape of a provider failing, not an anomaly — so the guard has to be
         here rather than at the emit site.
+
+        _force bypasses the cooldown: it is used when a fallback candidate
+        itself failed to start, which is a CONTINUATION of the same switch,
+        not a new failure burst.
         """
         import time as _t
 
         if not self._running or self._fallback_in_progress:
             return
+        if self._swap_in_progress:
+            # A swap (language change, stall recovery, or an in-flight
+            # fallback) is already rebuilding the provider; its result
+            # decides the next step.
+            log.info("fallback deferred: a provider swap is already running")
+            return
         now = _t.monotonic()
         since = now - self._last_fallback_at
-        if self._last_fallback_at and since < self.FALLBACK_COOLDOWN_S:
+        if not _force and self._last_fallback_at and since < self.FALLBACK_COOLDOWN_S:
             log.info("fallback suppressed: only %.1fs since the last switch "
                      "(cooldown %.0fs)", since, self.FALLBACK_COOLDOWN_S)
             return
 
-        self._fallback_in_progress = True
-        self._failure_timestamps.clear()
-        try:
-            switched = self.trigger_fallback()
-        finally:
-            self._fallback_in_progress = False
+        # record_failure() appends under _state_lock from provider worker
+        # threads; clearing without it races with that append and a failure
+        # can be counted against the NEW provider.
+        with self._state_lock:
+            self._failure_timestamps.clear()
 
-        if switched:
+        if self.trigger_fallback():
             self._last_fallback_at = _t.monotonic()
             return
 
@@ -1045,18 +1160,17 @@ class TranslationController(QObject):
             f"Há {quiet_for:.0f}s recebendo áudio sem legenda. Reiniciando o "
             "reconhecimento…",
         )
-        # Rebuild the provider in place: capture and the transcript file
-        # survive, so the event keeps its single recording.
-        if self._swap_provider(self.config):
-            self._last_result_at = _t.monotonic()
-            # Say so. Health only ever returned to OK from start() and from
-            # capture recovery, so a single stall left the tray amber and the
-            # tooltip accusing for the rest of the event even though captions
-            # were flowing again.
-            self._set_health(STATUS_OK, "", "")
-        else:
-            # Rebuilding failed too — escalate to the fallback chain.
-            self._fallback_requested.emit()
+        # Rebuild the provider in place, ON A WORKER: stopping/starting a
+        # cloud recognizer is 1.3–1.6 s of blocking network I/O, and this
+        # handler runs on the GUI thread, where that freeze reads as "the app
+        # hung". Capture and the transcript file survive either way, so the
+        # event keeps its single recording.
+        self._swap_provider_async(self.config)
+        # Give the fresh provider a full stall window before this fires again.
+        self._last_result_at = _t.monotonic()
+        # A successful swap announces itself in _on_swap_result (health back
+        # to OK); a failed one retries on a short backoff and then escalates
+        # to the fallback chain.
 
 
 # ---------------------------------------------------------------------- tray
@@ -1942,7 +2056,16 @@ def _claim_single_instance() -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--settings", action="store_true", help="Abrir apenas a janela de configurações")
+    parser.add_argument("--version", action="store_true",
+                        help="Imprimir a versão e sair (sem criar a interface gráfica)")
     args = parser.parse_args()
+
+    if args.version:
+        # CI smoke test for the frozen exe: reaching this line proves the
+        # binary starts and every import resolved — with no QApplication, no
+        # display, no single-instance mutex and no log file.
+        print(APP_VERSION)
+        return 0
 
     _setup_logging()
     log.info("starting CaptionBand")
