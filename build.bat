@@ -25,7 +25,13 @@ call .venv-build\Scripts\activate.bat
 
 echo [build] installing build dependencies...
 python -m pip install --upgrade pip
-python -m pip install -r requirements-build.txt
+REM Exact pins from the lock when present — reproducible builds. Regenerate
+REM the lock with pip-compile whenever requirements-build.txt changes.
+if exist requirements-build.lock (
+  python -m pip install -r requirements-build.lock
+) else (
+  python -m pip install -r requirements-build.txt
+)
 python -m pip install "pyinstaller>=6.0"
 
 echo [build] cleaning previous build...
