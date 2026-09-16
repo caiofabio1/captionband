@@ -6,7 +6,7 @@
 # adopted, do it as a single dedicated commit.
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
+    rev: v0.16.7
     hooks:
       - id: ruff
         args: [--fix]
