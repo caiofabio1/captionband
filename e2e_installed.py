@@ -1,7 +1,7 @@
 """End-to-end test of the INSTALLED build — the test that was missing.
 
 Everything else in this repo exercises the source tree. This installs
-Output\CaptionBandSetup.exe silently, launches the installed exe
+Output\\CaptionBandSetup.exe silently, launches the installed exe
 the way an operator would (auto-start), plays real speech through the
 speakers, presses the real global hotkey, and reads back app.log.
 
@@ -10,7 +10,7 @@ config.json (restored afterwards, byte for byte) because there is no other
 way to press "Iniciar" on a tray app from a script. Secrets are never read
 or printed: they live in the keyring, not in the file.
 
-Run:  python e2e_installed.py            (needs Output\...Setup.exe built)
+Run:  python e2e_installed.py            (needs Output\\...Setup.exe built)
 """
 from __future__ import annotations
 
