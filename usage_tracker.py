@@ -3,7 +3,7 @@
 We don't have access to provider billing APIs without each customer
 configuring scopes/permissions, so instead we track usage *locally* —
 seconds of audio sent per provider per day. Stored as JSON in
-%LOCALAPPDATA%\CaptionBand\usage.json.
+%LOCALAPPDATA%\\CaptionBand\\usage.json.
 
 The dashboard reads this and shows:
 - Hours used this month per provider
