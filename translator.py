@@ -419,6 +419,15 @@ class TranslationController(QObject):
 
     # ------------------------------------------------- source language
 
+    def source_switch_pending(self) -> bool:
+        """True while a language change is still being applied.
+
+        The live config only moves when the swap lands, so anything that
+        computes a RELATIVE step (the F9 cycle) has to know that its previous
+        request has not taken effect yet.
+        """
+        return bool(self._swap_in_progress or self._pending_source_mode is not None)
+
     def source_mode(self) -> str | None:
         """Current source setting: a language code, or None for auto-detect."""
         if self.config.provider != "azure":
@@ -1585,6 +1594,15 @@ class TrayApp(QObject):
         if len(cycle) < 2:
             return
         current = self.controller.source_mode()
+        # Cada toque no F9 e um PASSO, nao um destino. Enquanto a troca
+        # anterior nao terminou o estado ao vivo ainda nao mudou, entao
+        # calcular o proximo a partir dele faz varios toques seguidos
+        # colapsarem num so. MEDIDO no exe instalado: quatro toques
+        # produziram apenas duas trocas (auto -> pt -> en) e o ciclo nunca
+        # voltou ao auto-detectar. Estando pendente, o passo sai do ultimo
+        # alvo que ja pedimos.
+        if self.controller.source_switch_pending():
+            current = self._pending_language
         try:
             idx = cycle.index(current)
         except ValueError:

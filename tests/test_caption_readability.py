@@ -221,3 +221,55 @@ class TestPaintFailureIsNotFatal:
                 f"logou {len(failures)} vezes")
         finally:
             overlay.close()
+
+
+class TestHotkeyCycleAdvancesOnePerPress:
+    """F9 is a STEP, not a destination.
+
+    MEASURED on the installed exe: four presses produced only two swaps
+    (auto -> pt -> en) and the cycle never came back to auto-detect, because
+    every press computed "the next language" from the LIVE config — which has
+    not moved while a swap is still in flight. So presses 2, 3 and 4 all
+    resolved to the same target and collapsed into one move.
+    """
+
+    class _Ctrl:
+        def __init__(self):
+            self.pending = False
+            self.live = None
+            self.asked: list = []
+
+        def source_mode(self):
+            return self.live
+
+        def source_switch_pending(self):
+            return self.pending
+
+    def _tray(self, quick):
+        import translator as T
+
+        tray = T.TrayApp.__new__(T.TrayApp)          # sem Qt: só a lógica
+        tray.config = AppConfig(provider="azure", azure_speech_key="k",
+                                azure_quick_languages=quick)
+        tray.controller = self._Ctrl()
+        tray._pending_language = None
+        tray._language_cycle_requested = type(
+            "S", (), {"emit": lambda self: None})()
+        return tray
+
+    def test_four_presses_walk_the_whole_cycle_even_while_busy(self):
+        tray = self._tray(["pt-BR", "en-US", "es-ES"])
+        tray.controller.pending = True                # troca sempre em curso
+        targets = []
+        for _ in range(4):
+            tray.cycle_source_language()
+            targets.append(tray._pending_language)
+        assert targets == ["pt-BR", "en-US", "es-ES", None], (
+            f"o ciclo colapsou: {targets}")
+
+    def test_when_idle_the_step_comes_from_the_live_state(self):
+        tray = self._tray(["pt-BR", "en-US"])
+        tray.controller.pending = False
+        tray.controller.live = "pt-BR"
+        tray.cycle_source_language()
+        assert tray._pending_language == "en-US"
