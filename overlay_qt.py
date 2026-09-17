@@ -274,6 +274,11 @@ class CaptionOverlay(QWidget):
         )
         return rough
 
+    @staticmethod
+    def _bar_x(cfg, bar_w: int) -> int:
+        """Left edge of the language bar, kept inside the band."""
+        return max(2, cfg.padding - 6 - bar_w)
+
     def _reserved_height(self) -> int:
         """Height of the fixed caption band, derived from config alone.
 
@@ -299,7 +304,15 @@ class CaptionOverlay(QWidget):
             "original_plus_translation": 1 + max(1, len(targets)),
             "translations_only_multi": max(1, len(targets)),
         }.get(self.display_mode, 1)
-        lines = max(1, int(getattr(cfg, "reserved_lines", 3)), per_utt * 2)
+        # A banda tambem precisa caber o historico que o operador pediu.
+        # MEDIDO antes desta linha existir: com max_history em 2, 3 ou 5 o
+        # overlay guardava 3, 4 e 6 falas e desenhava sempre 4 linhas — o
+        # laco de ajuste descartava toda linha de historico que nao coubesse
+        # na banda fixa. "Linhas anteriores visiveis" era um no-op acima de 1.
+        # reserved_lines continua sendo PISO, entao aumentar a banda a mao
+        # ainda funciona; ela so nao pode mais anular o max_history em silencio.
+        wanted = (max(0, int(getattr(cfg, "max_history", 0))) + 1) * per_utt
+        lines = max(1, int(getattr(cfg, "reserved_lines", 3)), per_utt * 2, wanted)
         # The newest utterance is primary; whatever else fits is secondary.
         height = cfg.padding * 2 + primary * min(lines, per_utt * 2) + 6
         height += max(0, lines - per_utt * 2) * (secondary + 6)
@@ -409,6 +422,16 @@ class CaptionOverlay(QWidget):
     # `size - step >= floor`. The operator's live config is 25 pt, so the
     # comfortable-shrink pass never ran at all and the band jumped straight to
     # discarding history — the opposite of what this was written to do.
+    # Barra colorida que identifica o idioma de cada linha. MEDIDO: com 4px,
+    # espanhol e ingles saiam na MESMA cor de texto, mesmo tamanho e mesmo
+    # peso — a barrinha era a unica distincao, invisivel do fundo de um
+    # auditorio. No modo dividido cada caixa tem um idioma so e o problema
+    # nao existe; ele aparece justamente ao unificar as caixas.
+    LANG_BAR_PX = 14
+    LANG_BAR_PX_PRESENTATION = 22
+    # Folga vertical entre FALAS (nao entre os idiomas de uma mesma fala).
+    UTTERANCE_GAP_PX = 14
+
     MIN_FIT_RATIO = 0.72
     # Absolute floor, used only when even the current utterance alone does not
     # fit the band. Below this it is unreadable from the back of a room.
@@ -641,12 +664,9 @@ class CaptionOverlay(QWidget):
 
     # ------------------------------------------------------------------ rendering
 
-    def _compose_lines_with_lang(self) -> list[tuple[bool, str, float, str | None]]:
-        """Like _compose_lines but each tuple has language color at the end."""
-        out: list[tuple[bool, str, float, str | None]] = []
-        for is_primary, text, alpha, lang_color in self._compose_lines_internal():
-            out.append((is_primary, text, alpha, lang_color))
-        return out
+    def _compose_lines_with_lang(self) -> list[tuple[bool, str, float, str | None, int]]:
+        """Like _compose_lines but each tuple carries colour and utterance id."""
+        return list(self._compose_lines_internal())
 
     def _compose_lines_internal(self) -> list[tuple[bool, str, float, str | None]]:
         """Returns list of (is_primary, text, alpha, lang_color) tuples in render order
@@ -664,7 +684,7 @@ class CaptionOverlay(QWidget):
         targets = self.app_config.target_languages
         primary_lang = targets[0] if targets else ""
 
-        lines: list[tuple[bool, str, float, str | None]] = []
+        lines: list[tuple[bool, str, float, str | None, int]] = []
         n = len(self._history)
         for i, utt in enumerate(self._history):
             is_current = i == n - 1
@@ -680,10 +700,10 @@ class CaptionOverlay(QWidget):
                 # yet, show NOTHING for this utterance (cleaner UX than briefly
                 # flashing the source language).
                 if translation:
-                    lines.append((is_current, translation, alpha, lang_color))
+                    lines.append((is_current, translation, alpha, lang_color, i))
             elif self.display_mode == "original_plus_translation":
                 if utt.original:
-                    lines.append((False, self._truncate(utt.original), alpha * 0.7, lang_color))
+                    lines.append((False, self._truncate(utt.original), alpha * 0.7, lang_color, i))
                 # EVERY target, not only the first: with EN+ES configured the
                 # Spanish line simply never appeared in this mode.
                 shown = False
@@ -691,10 +711,10 @@ class CaptionOverlay(QWidget):
                     txt = utt.translations.get(lang, "")
                     if txt:
                         lines.append((is_current and j == 0, txt,
-                                      alpha if j == 0 else alpha * 0.85, lang_color))
+                                      alpha if j == 0 else alpha * 0.85, lang_color, i))
                         shown = True
                 if not shown and utt.original:
-                    lines.append((is_current, "…", alpha * 0.6, lang_color))
+                    lines.append((is_current, "…", alpha * 0.6, lang_color, i))
             elif self.display_mode == "translations_only_multi":
                 # Bilingual projection: two audiences, two languages, EQUAL
                 # weight — same size, same brightness, each in its fixed slot
@@ -706,10 +726,10 @@ class CaptionOverlay(QWidget):
                     txt = utt.translations.get(lang, "")
                     if txt:
                         lines.append((is_current, txt, alpha,
-                                      _color_for_language(lang) or lang_color))
+                                      _color_for_language(lang) or lang_color, i))
             else:
                 if translation:
-                    lines.append((is_current, translation, alpha, lang_color))
+                    lines.append((is_current, translation, alpha, lang_color, i))
 
         self._current_block_lines = len(lines) - before_current if n else 0
         return lines
@@ -737,7 +757,7 @@ class CaptionOverlay(QWidget):
             return
         height = cfg.padding * 2
 
-        for is_primary, text, _alpha, _lang in self._compose_lines_with_lang():
+        for is_primary, text, _alpha, _lang, _utt in self._compose_lines_with_lang():
             if not text:
                 continue
             metrics = primary_metrics if is_primary else secondary_metrics
@@ -777,6 +797,25 @@ class CaptionOverlay(QWidget):
     # ------------------------------------------------------------------ paint
 
     def paintEvent(self, event) -> None:
+        """Guarded: a bug in the paint path must not kill the session.
+
+        PyQt turns an unhandled exception in a slot into qFatal() -> abort(),
+        and paintEvent runs on every frame. DEMONSTRATED while writing the
+        change above: one wrong tuple unpack in here killed the whole process
+        with no traceback anywhere — the same silent death the operator kept
+        reporting. A caption that fails to draw should cost one blank frame
+        and a log line, never the event in front of an audience.
+        """
+        try:
+            self._paint(event)
+        except Exception:
+            # Once per widget: a broken paint repeats ~15x a second and would
+            # fill the log faster than the talk lasts.
+            if not getattr(self, "_paint_failed", False):
+                self._paint_failed = True
+                log.exception("caption paint failed; band stays blank")
+
+    def _paint(self, event) -> None:
         cfg = self.overlay_config
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -789,7 +828,7 @@ class CaptionOverlay(QWidget):
         painter.drawRoundedRect(self.rect(), 16, 16)
 
         lines = self._compose_lines_with_lang()
-        if not any(text for _, text, _, _ in lines):
+        if not any(text for _, text, _, _, _ in lines):
             return
 
         primary_font = QFont(cfg.font_family, cfg.primary_font_size, QFont.Weight.Bold)
@@ -814,12 +853,22 @@ class CaptionOverlay(QWidget):
             # one the room is reading — off the bottom edge.
             def _heights() -> list[int]:
                 out = []
-                for p, t, _a, _c in lines:
+                prev_utt = None
+                for p, t, _a, _c, u in lines:
                     if not t:
                         out.append(0)
                         continue
                     m = QFontMetrics(primary_font if p else secondary_font)
-                    out.append(m.lineSpacing() * len(self._wrap_lines(t, m, inner_width)) + 6)
+                    h = m.lineSpacing() * len(self._wrap_lines(t, m, inner_width)) + 6
+                    # Folga ao TROCAR de fala. As linhas de uma mesma fala (um
+                    # idioma cada) ficam juntas e as falas ficam separadas; sem
+                    # isso, com dois idiomas e historico ligado a banda vira
+                    # ES/EN/ES/EN sem agrupamento nenhum, que e o que o
+                    # operador descreveu como "as letras misturam".
+                    if prev_utt is not None and u != prev_utt:
+                        h += self.UTTERANCE_GAP_PX
+                    prev_utt = u
+                    out.append(h)
                 return out
 
             available = self.height() - cfg.padding * 2
@@ -867,9 +916,13 @@ class CaptionOverlay(QWidget):
                 # down as the block grows — the same jitter, just relocated.
                 y = max(cfg.padding, self.height() - cfg.padding - sum(heights))
 
-        for idx, (is_primary, text, alpha, lang_color) in enumerate(lines):
+        prev_utt = None
+        for idx, (is_primary, text, alpha, lang_color, utt) in enumerate(lines):
             if not text:
                 continue
+            if prev_utt is not None and utt != prev_utt:
+                y += self.UTTERANCE_GAP_PX
+            prev_utt = utt
             font = primary_font if is_primary else secondary_font
             base = primary_color if is_primary else secondary_color
 
@@ -902,19 +955,24 @@ class CaptionOverlay(QWidget):
                 painter.setPen(Qt.PenStyle.NoPen)
                 # Wider on the projection: the colour is how a reader across
                 # the room finds their language's line.
-                bar_w = 8 if self._presentation else 4
+                bar_w = (self.LANG_BAR_PX_PRESENTATION if self._presentation
+                         else self.LANG_BAR_PX)
                 painter.drawRoundedRect(
-                    cfg.padding - 4 - bar_w,
+                    self._bar_x(cfg, bar_w),
                     y + slide_offset,
                     bar_w,
                     block_height,
-                    2, 2,
+                    3, 3,
                 )
 
+            # A barra ficou grossa: o texto precisa comecar depois dela.
+            _bw = ((self.LANG_BAR_PX_PRESENTATION if self._presentation
+                    else self.LANG_BAR_PX) if lang_color else 0)
+            text_x = max(x + 4, self._bar_x(cfg, _bw) + _bw + 10) if _bw else x + 4
             for line in wrapped:
                 self._draw_outlined_text(
                     painter, line,
-                    x + 4,
+                    text_x,
                     y + slide_offset + metrics.ascent(),
                     color, outline, font,
                 )

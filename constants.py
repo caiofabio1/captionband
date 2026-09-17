@@ -12,7 +12,7 @@ from __future__ import annotations
 
 APP_NAME = "CaptionBand"
 APP_DISPLAY_NAME = "CaptionBand"
-APP_VERSION = "0.6.1"  # keep in step with installer.iss and pyproject.toml
+APP_VERSION = "0.6.2"  # keep in step with installer.iss and pyproject.toml
 APP_GITHUB_REPO = "caiofabio1/captionband"
 
 

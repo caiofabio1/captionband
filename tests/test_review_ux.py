@@ -69,7 +69,7 @@ class TestOverlayTwoTargets:
     def test_original_plus_translation_shows_every_target(self, overlay):
         overlay._on_update("Bom dia", {"en": "Good morning", "es": "Buenos días"},
                            "pt-BR", True, 0.0, "rid-1")
-        texts = [t for _p, t, _a, _c in overlay._compose_lines_with_lang()]
+        texts = [t for _p, t, _a, _c, _u in overlay._compose_lines_with_lang()]
         assert "Good morning" in texts
         assert "Buenos días" in texts, "second target was silently dropped"
 
@@ -79,11 +79,11 @@ class TestOverlayTwoTargets:
         overlay._on_update("Bom dia", {"en": "Good morning", "es": "Buenos días"},
                            "pt-BR", True, 0.0, "rid-1")
         lines = overlay._compose_lines_with_lang()
-        assert [t for _p, t, _a, _c in lines] == ["Good morning", "Buenos días"]
+        assert [t for _p, t, _a, _c, _u in lines] == ["Good morning", "Buenos días"]
         # Same size, same brightness; accent bar keyed to the TARGET language.
-        assert all(is_primary for is_primary, _t, _a, _c in lines)
-        assert len({a for _p, _t, a, _c in lines}) == 1
-        assert [c for _p, _t, _a, c in lines] == [
+        assert all(is_primary for is_primary, _t, _a, _c, _u in lines)
+        assert len({a for _p, _t, a, _c, _u in lines}) == 1
+        assert [c for _p, _t, _a, c, _u in lines] == [
             _color_for_language("en"), _color_for_language("es")]
 
     def test_presentation_mode_hides_operator_widgets(self, overlay):
