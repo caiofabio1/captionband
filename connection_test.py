@@ -180,10 +180,31 @@ def test_openai_whisper(api_key: str) -> tuple[bool, str]:
         return False, f"Falhou: {exc!s}"
 
 
-def test_openrouter(api_key: str) -> tuple[bool, str]:
-    """Smoke test OpenRouter API key by listing available models.
+def explain_failure(message: str) -> str:
+    """Turn an opaque HTTP/Cloudflare failure into something actionable.
 
-    Doesn't depend on any specific model — robust against catalog changes.
+    A Cloudflare 1009 is a geographic block by the API owner: the key is never
+    even looked at. Dumping the raw JSON made it read like a bad key, which is
+    the one thing it is not. Measured on 2026-09-17 from Brazil: Cerebras and
+    Groq both refuse before auth; OpenRouter and Azure answer normally.
+    """
+    low = message.lower()
+    if "1009" in message or "country_banned" in low or "country or region" in low:
+        return (message.split("Falhou:")[0] + "Este provedor bloqueia conexões do "
+                "país/região do seu IP (Cloudflare 1009). A chave não chega a ser "
+                "verificada — trocar de chave não resolve. Use outro provedor.")
+    return message
+
+
+def test_openrouter(api_key: str, stt_model: str = "") -> tuple[bool, str]:
+    """Smoke test the OpenRouter key AND the selected transcription model.
+
+    Auth alone is not the question worth answering here. On 2026-09-18 the key
+    was valid, the catalog listed 445 models, and transcription was impossible:
+    all five STT ids the app offered had been retired from OpenRouter, and this
+    test passed anyway. A fallback provider that reports OK and cannot
+    transcribe is worse than no fallback, because it is discovered mid-event.
+    So the selected model is checked against the live catalog.
     """
     if not api_key:
         return False, "API key vazia. Pegue grátis em openrouter.ai (free tier disponível)"
@@ -201,12 +222,13 @@ def test_openrouter(api_key: str) -> tuple[bool, str]:
         names = [m.id for m in models.data] if hasattr(models, 'data') else []
         if not names:
             return True, "OK · auth válida (lista vazia inesperada)"
-        # Quick sanity check: verify whisper + gpt models present
-        has_whisper = any("whisper" in n.lower() for n in names)
-        has_chat = any("gpt" in n.lower() or "llama" in n.lower() for n in names)
-        suffix = ""
-        if has_whisper and has_chat:
-            suffix = " (STT + chat OK)"
+        if stt_model and stt_model not in names:
+            return False, (
+                f"Auth OK, mas o modelo de transcrição '{stt_model}' não existe "
+                f"mais no OpenRouter ({len(names)} modelos no catálogo). "
+                f"Escolha outro em Modelo STT — sem isso o provedor de reserva "
+                f"não transcreve.")
+        suffix = f" · STT '{stt_model}' disponível" if stt_model else ""
         return True, f"OK · {len(names)} modelos disponíveis{suffix}"
     except Exception as exc:
         return False, f"Falhou: {exc!s}"

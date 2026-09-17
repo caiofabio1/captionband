@@ -143,7 +143,7 @@ class AppConfig:
     openai_stt_model: str = "whisper-1"
 
     openrouter_api_key: str = ""
-    openrouter_stt_model: str = "openai/whisper-1"
+    openrouter_stt_model: str = "google/gemini-3.5-flash-lite"
     openrouter_translation_model: str = "openai/gpt-oss-120b"
 
     google_credentials_json: str = ""
@@ -387,7 +387,37 @@ def load_config() -> AppConfig:
         audio=AudioConfig(**_coerce_fields(AudioConfig, audio_raw)),
         overlay=OverlayConfig(**_coerce_fields(OverlayConfig, overlay_raw)),
     )
+    _retire_dead_openrouter_models(cfg)
     return _hydrate_secrets(cfg)
+
+
+# Ids que o OpenRouter servia e nao serve mais. Medido em 2026-09-18 contra
+# openrouter.ai/api/v1/models: nenhum dos cinco aparece no catalogo, e um
+# config antigo guardando qualquer um deles faz a transcricao do provedor de
+# reserva falhar com "model not found" - justamente quando o Azure ja caiu.
+_DEAD_OPENROUTER_STT = {
+    "openai/whisper-1",
+    "openai/whisper-large-v3-turbo",
+    "openai/whisper-large-v3",
+    "openai/gpt-4o-mini-transcribe",
+    "openai/gpt-4o-transcribe",
+}
+_DEAD_OPENROUTER_TRANSLATION = {
+    "anthropic/claude-3.5-haiku": "anthropic/claude-haiku-4.5",
+    "google/gemini-flash-1.5": "google/gemini-2.5-flash",
+}
+
+
+def _retire_dead_openrouter_models(cfg: "AppConfig") -> None:
+    if cfg.openrouter_stt_model in _DEAD_OPENROUTER_STT:
+        log.warning("openrouter_stt_model %r nao existe mais; usando %r",
+                    cfg.openrouter_stt_model, AppConfig.openrouter_stt_model)
+        cfg.openrouter_stt_model = AppConfig.openrouter_stt_model
+    replacement = _DEAD_OPENROUTER_TRANSLATION.get(cfg.openrouter_translation_model)
+    if replacement:
+        log.warning("openrouter_translation_model %r nao existe mais; usando %r",
+                    cfg.openrouter_translation_model, replacement)
+        cfg.openrouter_translation_model = replacement
 
 
 def _hydrate_secrets(cfg: AppConfig) -> AppConfig:

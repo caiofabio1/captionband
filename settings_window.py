@@ -406,12 +406,15 @@ class SettingsWindow(QDialog):
     # ------------------------------------------------------------------ credential test slots
 
     def _test_openrouter_credential(self) -> None:
+        import functools
+
         from connection_test import test_openrouter
+        stt = self.openrouter_stt_model_combo.currentData() or ""
         self._do_credential_test(
             button=self.openrouter_test_btn,
             title="OpenRouter",
             api_key=self.openrouter_api_key_input.text().strip(),
-            test_func=test_openrouter,
+            test_func=functools.partial(test_openrouter, stt_model=stt),
         )
 
     def _test_cerebras_credential(self) -> None:
@@ -487,7 +490,8 @@ class SettingsWindow(QDialog):
         if ok:
             QMessageBox.information(self, title, msg)
         else:
-            QMessageBox.warning(self, title, msg)
+            from connection_test import explain_failure
+            QMessageBox.warning(self, title, explain_failure(msg))
 
     def _browse_google_creds_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -840,8 +844,9 @@ class SettingsWindow(QDialog):
 
         info = QLabel(
             "<b>1 chave OpenRouter para tudo</b> — STT + tradução.<br><br>"
-            "Esta composição usa só:<br>"
-            "• <b>OpenRouter key</b> — roteia pra Whisper + LLM internamente<br><br>"
+            "O OpenRouter <b>não serve Whisper</b>. A transcrição vai por modelo "
+            "multimodal que aceita áudio (Gemini, Voxtral, gpt-audio), via "
+            "chat/completions.<br><br>"
             "Configure na aba <b>Credenciais</b>.<br>"
             "<small>Latência ~25-40ms maior que ir direto. Custo similar ou ~5-10% maior.</small>"
         )
@@ -850,11 +855,15 @@ class SettingsWindow(QDialog):
 
         self.openrouter_stt_model_combo = QComboBox()
         for m in [
-            "openai/whisper-1",
-            "openai/whisper-large-v3-turbo",
-            "openai/whisper-large-v3",
-            "openai/gpt-4o-mini-transcribe",
-            "openai/gpt-4o-transcribe",
+            # Verificados contra openrouter.ai/api/v1/models em 2026-09-18:
+            # todos existem e aceitam audio de entrada. Os cinco ids anteriores
+            # foram retirados do catalogo e faziam a transcricao falhar em
+            # silencio; a lista morta vive em config._DEAD_OPENROUTER_STT.
+            "google/gemini-3.5-flash-lite",
+            "google/gemini-2.5-flash-lite",
+            "mistralai/voxtral-small-24b-2507",
+            "openai/gpt-audio-mini",
+            "google/gemini-2.5-flash",
         ]:
             self.openrouter_stt_model_combo.addItem(m, m)
         idx = self.openrouter_stt_model_combo.findData(self.config.openrouter_stt_model)
@@ -868,8 +877,8 @@ class SettingsWindow(QDialog):
             "openai/gpt-oss-20b",
             "meta-llama/llama-3.3-70b-instruct",
             "meta-llama/llama-3.1-8b-instruct",
-            "anthropic/claude-3.5-haiku",
-            "google/gemini-flash-1.5",
+            "anthropic/claude-haiku-4.5",
+            "google/gemini-2.5-flash",
         ]:
             self.openrouter_translation_model_combo.addItem(m, m)
         idx = self.openrouter_translation_model_combo.findData(self.config.openrouter_translation_model)
