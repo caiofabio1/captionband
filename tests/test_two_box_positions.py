@@ -89,3 +89,51 @@ class TestATelaNaoOfereceOConflito:
             assert w.second_position_combo.currentData() != "bottom"
         finally:
             w.close()
+
+
+class TestUmaDecisaoUmaTela:
+    """A posicao da legenda nao mora em duas abas.
+
+    Apontado pelo operador: "Aparencia e posicao, ambas manipulando a posicao
+    da legenda. Para a legenda dividida a configuracao legenda no topo nem faz
+    sentido." Enquanto `position` ficava em Aparencia e `second_position` em
+    Layout/Projecao, dava para escolher a mesma posicao para as duas caixas sem
+    nunca ver as duas escolhas na mesma tela.
+    """
+
+    def _aba_de(self, win, widget):
+        from PyQt6.QtWidgets import QWidget
+        for i in range(win.tabs.count()):
+            pilha = [win.tabs.widget(i)]
+            while pilha:
+                cur = pilha.pop()
+                if cur is widget:
+                    return win.tabs.tabText(i)
+                pilha.extend(c for c in cur.children() if isinstance(c, QWidget))
+        return None
+
+    def test_as_duas_posicoes_vivem_na_mesma_aba(self, qapp):
+        from settings_window import SettingsWindow
+        w = SettingsWindow(_cfg("bottom", "top"))
+        try:
+            a = self._aba_de(w, w.position_combo)
+            b = self._aba_de(w, w.second_position_combo)
+            assert a is not None and a == b, (
+                f"posicao da 1a esta em {a!r} e da 2a em {b!r}")
+            assert "Layout" in a
+        finally:
+            w.close()
+
+    def test_o_rotulo_diz_1a_caixa_quando_ha_duas(self, qapp):
+        from settings_window import SettingsWindow
+        w = SettingsWindow(_cfg("bottom", "top"))
+        try:
+            w.layout_combo.setCurrentIndex(w.layout_combo.findData("split"))
+            assert "1ª caixa" in w.position_label.text(), w.position_label.text()
+            assert w.second_position_combo.isEnabled()
+
+            w.layout_combo.setCurrentIndex(w.layout_combo.findData("stacked"))
+            assert w.position_label.text() == "Posição da legenda:"
+            assert not w.second_position_combo.isEnabled()
+        finally:
+            w.close()

@@ -943,10 +943,6 @@ class SettingsWindow(QDialog):
         aparencia_group = QGroupBox("Aparência")
         layout = QFormLayout(aparencia_group)
 
-        self.position_combo = QComboBox()
-        for code, label in POSITIONS.items():
-            self.position_combo.addItem(label, code)
-        layout.addRow("Posição da legenda:", self.position_combo)
 
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.opacity_slider.setRange(20, 100)
@@ -1071,19 +1067,30 @@ class SettingsWindow(QDialog):
             "'Bilíngue em duas caixas'.")
         pl.addRow("Com 2 idiomas de saída:", self.layout_combo)
 
+        # As duas posicoes moram juntas de proposito: sao as duas metades da
+        # mesma decisao. Enquanto `position` ficava em Aparencia e
+        # `second_position` aqui, dava para escolher a MESMA posicao para as
+        # duas sem nunca ver as duas escolhas na mesma tela -- e o resultado
+        # eram duas bandas sobrepostas lidas como uma caixa empilhada.
+        self.position_combo = QComboBox()
+        for code, label in POSITIONS.items():
+            self.position_combo.addItem(label, code)
+        self.position_label = QLabel("Posição da legenda:")
+        pl.addRow(self.position_label, self.position_combo)
+
         self.second_position_combo = QComboBox()
         for code, label in POSITIONS.items():
             self.second_position_combo.addItem(label, code)
-        pl.addRow("Posição inicial da 2ª caixa:", self.second_position_combo)
+        pl.addRow("Posição da 2ª caixa:", self.second_position_combo)
         self.layout_combo.currentIndexChanged.connect(
-            lambda _i: self.second_position_combo.setEnabled(
-                self.layout_combo.currentData() == "split"))
+            lambda _i: self._sync_layout_labels())
         # A posicao da 1a banda sai da lista da 2a: duas bandas no mesmo lugar
         # ficam 100% sobrepostas e lem como UMA caixa com os idiomas
         # empilhados. Oferecer a opcao e depois corrigi-la no backend faria a
         # tela mentir sobre o que vai acontecer; entao ela nao e oferecida.
         self.position_combo.currentIndexChanged.connect(
             lambda _i: self._sync_second_position_choices())
+        self._sync_layout_labels()
         self._sync_second_position_choices()
 
         self.screen_combo = QComboBox()
@@ -1299,7 +1306,7 @@ class SettingsWindow(QDialog):
             max(0, self.layout_combo.findData("split" if ov.split_languages else "stacked")))
         self.second_position_combo.setCurrentIndex(
             max(0, self.second_position_combo.findData(ov.second_position or "top")))
-        self.second_position_combo.setEnabled(bool(ov.split_languages))
+        self._sync_layout_labels()
         # Um config.json que ja traz as duas caixas na mesma posicao cai aqui:
         # sem este sync a tela abriria mostrando a escolha conflitante.
         self._sync_second_position_choices()
@@ -1393,6 +1400,13 @@ class SettingsWindow(QDialog):
 
     # The preview band closes itself after this long.
     PREVIEW_MS = 8000
+
+    def _sync_layout_labels(self) -> None:
+        """Em duas caixas, `position` posiciona a 1a CAIXA, nao "a legenda"."""
+        dividido = self.layout_combo.currentData() == "split"
+        self.second_position_combo.setEnabled(dividido)
+        self.position_label.setText(
+            "Posição da 1ª caixa:" if dividido else "Posição da legenda:")
 
     def _sync_second_position_choices(self) -> None:
         """Grey out, in the second box's list, wherever the first band sits."""
