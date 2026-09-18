@@ -54,5 +54,26 @@ Filename: "{app}\{#AppExeName}"; Description: "Iniciar agora"; Flags: nowait pos
 ; Stale files from a previous one-file install or an older _internal tree.
 Type: filesandordirs; Name: "{app}\_internal"
 
+; A instalacao antiga, de quando o app se chamava TeamsLiveTranslation.
+;
+; O AppId nao mudou no rename (de proposito: e ele que da continuidade a
+; entrada de desinstalacao), mas DefaultDirName e DefaultGroupName mudaram.
+; O Inno chaveia a entrada de desinstalacao pelo AppId, entao a instalacao
+; nova SOBRESCREVEU a entrada da antiga apontando para a pasta nova -- e a
+; pasta antiga ficou orfa: 159 MB no disco, com um unins000.exe que nao
+; aparece mais em "Aplicativos instalados", e com um atalho de menu Iniciar
+; TAMBEM chamado "CaptionBand", num grupo chamado "Teams Live Translation".
+;
+; O operador abriu esse atalho por engano em 2026-09-18 e usou por um tempo
+; uma versao de dois dias antes, digitando credenciais nela. Duas entradas de
+; menu com o MESMO nome e nenhuma forma de distinguir qual e a boa.
+;
+; Nao da para simplesmente rodar o unins000.exe antigo: mesmo AppId significa
+; que ele apagaria a entrada de desinstalacao da versao ATUAL. Logo, remocao
+; direta da pasta e do grupo.
+Type: filesandordirs; Name: "{autopf}\TeamsLiveTranslation"
+Type: filesandordirs; Name: "{userprograms}\Teams Live Translation"
+Type: filesandordirs; Name: "{commonprograms}\Teams Live Translation"
+
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\_internal"
