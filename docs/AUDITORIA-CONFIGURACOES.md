@@ -90,6 +90,16 @@ Medido campo a campo contra `_build_config()` e contra quem lê no app:
 | `overlay.fade_ms` | — | **ninguém** | 🔴 morto: apagar |
 | `overlay.streaming_partials` | — | **ninguém** | 🔴 morto: apagar |
 | `overlay.max_chars` | — | `overlay_qt.py` | 🟡 vivo, sem controle |
+
+> 🔴 **Correção a esta auditoria.** A primeira versão dizia que `max_chars`
+> "limita caracteres por linha" e recomendava aproximá-lo dos 37 da BBC. Está
+> errado, e a proposta E saiu daí. `_wrap_lines()` não recebe `max_chars`
+> nenhum — a quebra de linha vem da largura da banda com o tamanho da fonte.
+> O que `max_chars` faz, medido: **corta o começo da fala** e mostra o final
+> com `…` na frente. Com `max_chars=60`, uma fala de 122 caracteres aparece
+> como `…que e esta parte que voce esta lendo agora no fim da frase.` É uma
+> válvula contra fala que não termina. O controle foi exposto com esse nome
+> ("Cortar fala acima de"), não com o nome errado.
 | `overlay.anchor_newest` | — | `overlay_qt.py`, `translator.py` | 🟡 vivo, sem controle |
 | `audio.samplerate` | — | captura e todos os provedores | ⚪ interno, correto ficar fora |
 | `audio.channels` | — | captura, Azure | ⚪ interno, correto ficar fora |
@@ -135,27 +145,43 @@ Não mexer.
 
 ---
 
-## 7. Proposta (precisa da sua decisão)
+## 7. Decisões tomadas em 2026-09-18 — todas implementadas
 
-**A. Juntar tudo que decide a BANDA numa aba só.** Hoje "Aparência" mistura
-aparência de verdade (cor, fonte, opacidade) com comportamento de conteúdo
-(`max_history`, `concat_gap_ms`). Proposta: uma aba **"Legenda"** com posição,
-nº de caixas, histórico, altura e junção de falas; "Aparência" fica só com
-cor, fonte, opacidade, largura e margem.
+**A + B ✅ "Layout / Projeção" virou "Legenda".** Recebeu `display_mode`
+(de Idiomas), `max_history`, `concat_gap_ms` e `click_through` (de Aparência).
+"Aparência" ficou só com cor, fonte, opacidade, largura e margem. As duas
+frases de ajuda que apontavam de uma aba para a outra saíram — não havia mais
+para onde apontar. Resultado medido: nenhum controle em duas abas, e os quatro
+campos que decidem a altura na mesma tela.
 
-**B. Mover `display_mode` de Idiomas para junto do resto.** É o campo que
-decide quantas linhas cada fala ocupa; hoje está na aba de idiomas porque
-*parece* assunto de idioma.
+`display_mode` abre a aba, porque é ele que define quantas linhas cada fala
+ocupa: tudo abaixo depende disso.
 
-**C. Dizer que `reserved_lines` é piso**, não valor final — hoje o operador
-ajusta e o número efetivo é outro.
+**C ✅ "Altura da banda fixa" virou "Altura mínima da banda"**, com a dica
+explicando que quem manda é o histórico.
 
-**D. Apagar `fade_ms` e `streaming_partials`.** Dois campos sem leitor.
+**D ✅ `fade_ms` e `streaming_partials` apagados.**
 
-**E. Expor `max_chars` e `anchor_newest`, ou aceitá-los como internos.**
-`max_chars` (220) importa de verdade: as diretrizes de legenda da BBC
-recomendam 37 caracteres por linha e no máximo 2 linhas.
+**E ✅ `max_chars` exposto como "Cortar fala acima de"** — com o nome certo,
+depois da correção acima. Aceita 0 = "nunca cortar". `anchor_newest` ficou
+interno.
 
-Nenhuma das cinco é urgente para o próximo evento. **D** é deleção pura e
-pode ir junto de qualquer outra coisa; **A** e **B** mudam a memória muscular
-de quem já usa o app, então são decisão sua.
+Travado por `tests/test_settings_organization.py` (16 testes, verificados por
+mutação nos quatro caminhos: histórico de volta em Aparência, os dois rótulos
+voltando a mentir, e `fade_ms` ressuscitando).
+
+### Aba "Legenda", na ordem em que aparece
+
+| Controle | Campo |
+|---|---|
+| Como mostrar | `display_mode` |
+| Com 2 idiomas de saída | `split_languages` |
+| Posição da legenda / da 1ª caixa | `position` |
+| Posição da 2ª caixa | `second_position` |
+| Tela da legenda | `screen_name` |
+| Banda de altura fixa | `stable_height` |
+| Altura mínima da banda | `reserved_lines` |
+| Falas anteriores visíveis | `max_history` |
+| Cortar fala acima de | `max_chars` |
+| Juntar falas próximas | `concat_gap_ms` |
+| Click-through | `click_through` |

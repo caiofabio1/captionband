@@ -120,7 +120,7 @@ class TestUmaDecisaoUmaTela:
             b = self._aba_de(w, w.second_position_combo)
             assert a is not None and a == b, (
                 f"posicao da 1a esta em {a!r} e da 2a em {b!r}")
-            assert "Layout" in a
+            assert a == "Legenda"
         finally:
             w.close()
 

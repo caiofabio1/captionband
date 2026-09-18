@@ -192,7 +192,7 @@ class SettingsWindow(QDialog):
         self.tabs.addTab(self._wrap_in_scroll(self._build_languages_tab()), "Idiomas")
         self.tabs.addTab(self._wrap_in_scroll(self._build_audio_tab()), "Áudio")
         self.tabs.addTab(self._wrap_in_scroll(self._build_appearance_tab()), "Aparência")
-        self.tabs.addTab(self._wrap_in_scroll(self._build_layout_tab()), "Layout / Projeção")
+        self.tabs.addTab(self._wrap_in_scroll(self._build_layout_tab()), "Legenda")
         self.tabs.addTab(self._wrap_in_scroll(self._build_about_tab()), "Sobre")
         # Breadcrumbs for the crash log: which tab, which button, last.
         log.info("ui: settings opened")
@@ -787,22 +787,6 @@ class SettingsWindow(QDialog):
         self._refresh_openai_realtime_cost()
         outer.addWidget(targets_group)
 
-        mode_group = QGroupBox("Modo de exibição")
-        mg_layout = QFormLayout(mode_group)
-        self.mode_combo = QComboBox()
-        for code, label in DISPLAY_MODES.items():
-            self.mode_combo.addItem(label, code)
-        self.mode_combo.setToolTip(
-            "O QUE aparece em cada frase. ONDE cada idioma aparece (uma caixa "
-            "empilhada ou duas caixas) fica em Aparência → Layout bilíngue.")
-        mg_layout.addRow("Como mostrar:", self.mode_combo)
-        hint = QLabel("Para projeção com EN + ES: 'Bilíngue' aqui, e em Aparência "
-                      "escolha empilhado ou duas caixas. O 📺 Modo evento da bandeja "
-                      "aplica isso num clique.")
-        hint.setWordWrap(True)
-        hint.setStyleSheet("color: #888;")
-        mg_layout.addRow(hint)
-        outer.addWidget(mode_group)
 
         outer.addStretch(1)
         return w
@@ -987,28 +971,6 @@ class SettingsWindow(QDialog):
         self.bg_color_btn = ColorButton("#000000")
         layout.addRow("Cor de fundo:", self.bg_color_btn)
 
-        # Linhas anteriores (max_history): controla quantas utterances passadas
-        # ficam visíveis dimmed acima da atual.
-        self.max_history_spin = QSpinBox()
-        self.max_history_spin.setRange(0, 5)
-        self.max_history_spin.setSuffix(" linha(s)")
-        self.max_history_spin.setToolTip(
-            "0 = só a legenda atual. 1-5 = mostra também as anteriores dimmed.\n"
-            "Recomendado: 1 com Azure Streaming, 2 com OpenRouter/Whisper."
-        )
-        layout.addRow("Linhas anteriores visíveis:", self.max_history_spin)
-
-        # Concat gap (chunk-final providers only — Azure streaming ignores)
-        self.concat_gap_spin = QSpinBox()
-        self.concat_gap_spin.setRange(0, 5000)
-        self.concat_gap_spin.setSingleStep(250)
-        self.concat_gap_spin.setSuffix(" ms")
-        self.concat_gap_spin.setToolTip(
-            "Gap máximo para juntar duas falas curtas em uma linha (OpenRouter/Whisper).\n"
-            "0 desativa. Azure Streaming ignora este valor — sempre cria linha nova."
-        )
-        layout.addRow("Auto-concat gap:", self.concat_gap_spin)
-
         self.font_family_combo = QComboBox()
         try:
             from PyQt6.QtGui import QFontDatabase
@@ -1024,11 +986,6 @@ class SettingsWindow(QDialog):
         self.padding_spin.setSuffix(" px")
         self.padding_spin.setToolTip("Espaço interno entre o texto e a borda da legenda.")
         layout.addRow("Padding interno:", self.padding_spin)
-
-        self.click_through_check = QCheckBox(
-            "Click-through (legenda não bloqueia cliques no Teams)"
-        )
-        layout.addRow(self.click_through_check)
 
         preview = QPushButton("Visualizar legenda agora")
         preview.clicked.connect(self._on_preview)
@@ -1049,14 +1006,25 @@ class SettingsWindow(QDialog):
         w = QWidget()
         outer = QVBoxLayout(w)
         intro = QLabel(
-            "Onde cada idioma aparece na tela. O que aparece em cada frase "
-            "(só tradução, com o idioma falado, bilíngue) fica em Idiomas → Como mostrar.")
+            "Tudo o que decide a legenda: o que aparece em cada fala, onde "
+            "aparece, quantas caixas e que altura elas têm.")
         intro.setWordWrap(True)
         intro.setStyleSheet("color: #888; padding: 4px 0 8px 0;")
         outer.addWidget(intro)
 
-        proj_group = QGroupBox("Layout bilíngue e projeção")
+        proj_group = QGroupBox("Legenda")
         pl = QFormLayout(proj_group)
+
+        # "Como mostrar" abre a tela porque e ele que define quantas linhas
+        # cada fala ocupa -- todas as decisoes abaixo dependem disso. Estava em
+        # Idiomas, e as duas abas se referiam uma a outra por escrito.
+        self.mode_combo = QComboBox()
+        for code, label in DISPLAY_MODES.items():
+            self.mode_combo.addItem(label, code)
+        self.mode_combo.setToolTip(
+            "O QUE aparece em cada fala: só a tradução, com o idioma falado, "
+            "ou bilíngue. Decide quantas linhas cada fala ocupa.")
+        pl.addRow("Como mostrar:", self.mode_combo)
 
         self.layout_combo = QComboBox()
         self.layout_combo.addItem("Empilhado — os idiomas um sobre o outro, numa caixa só", "stacked")
@@ -1106,10 +1074,57 @@ class SettingsWindow(QDialog):
         self.reserved_lines_spin.setRange(1, 12)
         self.reserved_lines_spin.setSuffix(" linha(s)")
         self.reserved_lines_spin.setToolTip(
-            "Altura da banda fixa. Nunca menor que uma frase completa no modo "
-            "de exibição escolhido; o texto encolhe para caber.")
-        pl.addRow("Altura da banda fixa:", self.reserved_lines_spin)
+            "PISO da altura, nao o valor final. Quem manda e o historico: a "
+            "banda cresce sozinha para caber as linhas anteriores pedidas. "
+            "Nunca fica menor que uma fala completa no modo escolhido.")
+        pl.addRow("Altura mínima da banda:", self.reserved_lines_spin)
         self.stable_height_check.toggled.connect(self.reserved_lines_spin.setEnabled)
+
+        # Historico: mora aqui porque e ele que decide a altura da banda desde
+        # e56e03a. Ficava em Aparencia, a duas abas de distancia do piso de
+        # altura com que disputava o mesmo numero -- e perdia em silencio.
+        self.max_history_spin = QSpinBox()
+        self.max_history_spin.setRange(0, 5)
+        self.max_history_spin.setSuffix(" fala(s)")
+        self.max_history_spin.setToolTip(
+            "0 = só a fala atual. 1-5 = mostra também as anteriores, esmaecidas.\n"
+            "A banda cresce para caber o que você pedir aqui.")
+        pl.addRow("Falas anteriores visíveis:", self.max_history_spin)
+
+        # max_chars NAO quebra linha -- isso quem faz e a largura da banda com
+        # o tamanho da fonte. Ele CORTA a fala, mantendo o FINAL e pondo "..."
+        # na frente. Medido: com max_chars=60, uma fala de 122 caracteres
+        # aparece como "...que e esta parte que voce esta lendo agora no fim da
+        # frase." E uma valvula contra fala que nao termina, e o rotulo tem de
+        # dizer isso: a primeira versao desta linha dizia "Maximo por linha" e
+        # citava as diretrizes da BBC, que sao sobre quebra de linha. Errado.
+        self.max_chars_spin = QSpinBox()
+        self.max_chars_spin.setRange(0, 600)
+        self.max_chars_spin.setSingleStep(20)
+        self.max_chars_spin.setSuffix(" caracteres")
+        self.max_chars_spin.setSpecialValueText("nunca cortar")
+        self.max_chars_spin.setToolTip(
+            "Fala mais longa que isto aparece CORTADA NO COMEÇO, mostrando o "
+            "final com \"…\" na frente. Não é quebra de linha — quem quebra a "
+            "linha é a largura da banda com o tamanho da fonte.\n"
+            "É uma válvula contra fala que não termina. 220 = praticamente "
+            "nunca corta. 0 = nunca corta.")
+        pl.addRow("Cortar fala acima de:", self.max_chars_spin)
+
+        self.concat_gap_spin = QSpinBox()
+        self.concat_gap_spin.setRange(0, 5000)
+        self.concat_gap_spin.setSingleStep(250)
+        self.concat_gap_spin.setSuffix(" ms")
+        self.concat_gap_spin.setToolTip(
+            "Gap máximo para juntar duas falas curtas numa linha "
+            "(OpenRouter/Whisper).\n0 desativa. O Azure Streaming ignora este "
+            "valor — sempre cria linha nova."
+        )
+        pl.addRow("Juntar falas próximas:", self.concat_gap_spin)
+
+        self.click_through_check = QCheckBox(
+            "Click-through (a legenda não bloqueia cliques no que está atrás)")
+        pl.addRow(self.click_through_check)
 
         preview = QPushButton("Visualizar legenda agora")
         preview.clicked.connect(self._on_preview)
@@ -1320,6 +1335,7 @@ class SettingsWindow(QDialog):
         self.reserved_lines_spin.setValue(int(ov.reserved_lines))
         self.reserved_lines_spin.setEnabled(bool(ov.stable_height))
         self.concat_gap_spin.setValue(self.config.overlay.concat_gap_ms)
+        self.max_chars_spin.setValue(int(self.config.overlay.max_chars))
         idx = self.font_family_combo.findData(self.config.overlay.font_family)
         if idx >= 0:
             self.font_family_combo.setCurrentIndex(idx)
@@ -1389,6 +1405,7 @@ class SettingsWindow(QDialog):
                 click_through=self.click_through_check.isChecked(),
                 font_family=self.font_family_combo.currentData() or "Segoe UI",
                 concat_gap_ms=self.concat_gap_spin.value(),
+            max_chars=self.max_chars_spin.value(),
                 split_languages=self.layout_combo.currentData() == "split",
                 second_position=self.second_position_combo.currentData() or "top",
                 screen_name=self.screen_combo.currentData() or "",

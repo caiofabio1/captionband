@@ -80,7 +80,6 @@ class OverlayConfig:
     # current one (0 = single line only, 1 = +1 prev, 2 = +2 prev, 3 = +3).
     max_history: int = 2
     click_through: bool = False
-    fade_ms: int = 200
     max_chars: int = 220
     font_family: str = "Segoe UI"
     # Auto-concatenate consecutive utterances within this gap if same language.
@@ -88,7 +87,6 @@ class OverlayConfig:
     concat_gap_ms: int = 1500
     # If true and provider supports it (Google), enable streaming partials
     # so original text appears as the speaker talks.
-    streaming_partials: bool = True
     # Reserve a fixed caption band instead of resizing the window on every
     # event. Resizing per event makes the whole caption jump on screen as
     # text grows and shrinks; on a projector that is what the room notices
