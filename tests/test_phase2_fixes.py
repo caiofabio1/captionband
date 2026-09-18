@@ -11,7 +11,7 @@ Covered here, one test class per finding:
   client in the process;
 * OpenRouter STT failures returned None with only a log line — a dead key
   presented as a "quiet room" behind a green tray icon;
-* Groq/Whisper-local had no backpressure cap: when a chunk took longer than
+* Chunked-REST/Whisper-local had no backpressure cap: when a chunk took longer than
   the speech that produced it, the executor's unbounded queue became a
   latency accumulator (captions arriving tens of seconds late, hundreds of
   MB of PCM pinned);
@@ -50,7 +50,7 @@ from providers.base import (
     STATUS_FATAL,
 )
 from providers.google import GoogleProvider
-from providers.groq import GroqProvider
+from providers.chunked_rest import ChunkedRestProvider
 from providers.openai_realtime import (
     OpenAIRealtimeProvider,
     _resample_to_24k,
@@ -115,8 +115,8 @@ def _google(on_event, targets=("en",)) -> GoogleProvider:
     )
 
 
-def _groq(on_event, targets=("en",)) -> GroqProvider:
-    return GroqProvider(
+def _chunked(on_event, targets=("en",)) -> ChunkedRestProvider:
+    return ChunkedRestProvider(
         api_key="k",
         transcription_model="m",
         translation_model="m",
@@ -298,8 +298,8 @@ class TestBackpressure:
         finally:
             p._executor.shutdown(wait=False, cancel_futures=True)
 
-    def test_groq_drops_oldest_and_releases_the_slot(self, monkeypatch):
-        self._check_drop_oldest(_groq(lambda ev: None), monkeypatch)
+    def test_chunked_drops_oldest_and_releases_the_slot(self, monkeypatch):
+        self._check_drop_oldest(_chunked(lambda ev: None), monkeypatch)
 
     def test_whisper_local_drops_oldest_and_releases_the_slot(self, monkeypatch):
         p = WhisperLocalProvider(
@@ -317,8 +317,8 @@ class TestBackpressure:
 
 
 class TestPersistentTranslationPool:
-    def test_groq_fanout_reuses_one_pool_across_utterances(self):
-        p = _groq(lambda ev: None, targets=("en", "es"))
+    def test_chunked_fanout_reuses_one_pool_across_utterances(self):
+        p = _chunked(lambda ev: None, targets=("en", "es"))
         pool = ThreadPoolExecutor(max_workers=2)
         p._translation_pool = pool
         p._translation_client = _FakeChatClient()
@@ -336,7 +336,7 @@ class TestPersistentTranslationPool:
     def test_no_per_utterance_executor_in_the_fanout(self):
         """Static guard against reintroducing `with ThreadPoolExecutor(...)`
         inside a per-utterance path."""
-        for name in ("groq.py", "google.py"):
+        for name in ("chunked_rest.py", "google.py"):
             src = _strip_comments(
                 (REPO / "providers" / name).read_text(encoding="utf-8"))
             assert "with ThreadPoolExecutor" not in src, (

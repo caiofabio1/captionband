@@ -1,4 +1,4 @@
-"""Audio buffer for chunked-API providers (Groq, Whisper local).
+"""Audio buffer for chunked-API providers (OpenRouter, Whisper local).
 
 Live-captioning best practices applied:
 

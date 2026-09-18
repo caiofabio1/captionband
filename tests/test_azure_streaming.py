@@ -266,7 +266,7 @@ class TestOverlayPartialDedup:
         assert overlay._history[1].original == "Tudo bem, obrigado."
 
     def test_chunk_final_still_auto_concats_when_no_result_id(self, overlay):
-        # Regression guard: chunk-final providers (Groq, Whisper local) must
+        # Regression guard: chunk-final providers (OpenRouter, Whisper local) must
         # keep their auto-concat behavior. They send result_id="".
         overlay._on_update("Olá como vai", {"es": "Hola cómo estás"}, "pt-BR", True, 0.0, "")
         overlay._on_update("tudo bem.", {"es": "todo bien."}, "pt-BR", True, 0.0, "")

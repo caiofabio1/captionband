@@ -28,11 +28,8 @@ log = logging.getLogger(__name__)
 
 PROVIDER_LABELS = {
     "azure": "Azure Speech Translation",
-    "groq": "Groq (Whisper turbo + Llama)",
     "google": "Google Speech v2 + Translate",
     "whisper_local": "Whisper local (offline)",
-    "cerebras": "Cerebras (Llama 3.3 70B + Groq Whisper)",
-    "openai_cerebras": "OpenAI Whisper + Cerebras (paid SLA — recomendado para produção)",
     "openrouter": "OpenRouter (1 chave para tudo — recomendado simples)",
     "openai_realtime": "OpenAI Realtime Translate (streaming, 1 sessão POR idioma)",
 }
@@ -41,11 +38,8 @@ PROVIDER_LABELS = {
 # dependency produces an instruction instead of a stack trace.
 PROVIDER_REQUIREMENTS = {
     "azure": ("azure-cognitiveservices-speech", "azure.cognitiveservices.speech"),
-    "groq": ("openai", "openai"),
     "google": ("google-cloud-speech", "google.cloud.speech"),
     "whisper_local": ("faster-whisper", "faster_whisper"),
-    "cerebras": ("openai", "openai"),
-    "openai_cerebras": ("openai", "openai"),
     "openrouter": ("openai", "openai"),
     "openai_realtime": ("websocket-client", "websocket"),
 }
@@ -96,21 +90,12 @@ def _provider_class(name: str):
         if name == "azure":
             from .azure import AzureProvider
             return AzureProvider
-        if name == "groq":
-            from .groq import GroqProvider
-            return GroqProvider
         if name == "google":
             from .google import GoogleProvider
             return GoogleProvider
         if name == "whisper_local":
             from .whisper_local import WhisperLocalProvider
             return WhisperLocalProvider
-        if name == "cerebras":
-            from .cerebras import CerebrasProvider
-            return CerebrasProvider
-        if name == "openai_cerebras":
-            from .openai_cerebras import OpenAICerebrasProvider
-            return OpenAICerebrasProvider
         if name == "openrouter":
             from .openrouter import OpenRouterProvider
             return OpenRouterProvider
@@ -165,19 +150,6 @@ def _construct(
             streaming_mode=app_config.azure_streaming_mode,
             streaming_language=app_config.azure_streaming_language,
         )
-    if name == "groq":
-        from .groq import GroqProvider
-
-        return GroqProvider(
-            api_key=app_config.groq_api_key,
-            transcription_model=app_config.groq_transcription_model,
-            translation_model=app_config.groq_translation_model,
-            source_languages=app_config.source_languages,
-            target_languages=app_config.target_languages,
-            on_event=on_event,
-            samplerate=app_config.audio.samplerate,
-            chunk_seconds=app_config.chunk_seconds,
-        )
     if name == "google":
         from .google import GoogleProvider
 
@@ -198,34 +170,6 @@ def _construct(
             whisper_model=app_config.whisper_model,
             whisper_device=app_config.whisper_device,
             whisper_compute_type=app_config.whisper_compute_type,
-            source_languages=app_config.source_languages,
-            target_languages=app_config.target_languages,
-            on_event=on_event,
-            samplerate=app_config.audio.samplerate,
-            chunk_seconds=app_config.chunk_seconds,
-        )
-    if name == "cerebras":
-        from .cerebras import CerebrasProvider
-
-        return CerebrasProvider(
-            api_key=app_config.groq_api_key,
-            cerebras_api_key=app_config.cerebras_api_key,
-            transcription_model=app_config.groq_transcription_model,
-            cerebras_translation_model=app_config.cerebras_translation_model,
-            source_languages=app_config.source_languages,
-            target_languages=app_config.target_languages,
-            on_event=on_event,
-            samplerate=app_config.audio.samplerate,
-            chunk_seconds=app_config.chunk_seconds,
-        )
-    if name == "openai_cerebras":
-        from .openai_cerebras import OpenAICerebrasProvider
-
-        return OpenAICerebrasProvider(
-            openai_api_key=app_config.openai_api_key,
-            cerebras_api_key=app_config.cerebras_api_key,
-            openai_stt_model=app_config.openai_stt_model,
-            cerebras_translation_model=app_config.cerebras_translation_model,
             source_languages=app_config.source_languages,
             target_languages=app_config.target_languages,
             on_event=on_event,

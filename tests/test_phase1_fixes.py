@@ -183,7 +183,7 @@ def ctrl(qapp, monkeypatch):
                         (0.02, 0.02, 0.02), raising=False)
 
     cfg = AppConfig(provider="azure", azure_speech_key="k", azure_speech_region="r",
-                    groq_api_key="k", openrouter_api_key="k",
+                    openrouter_api_key="k",
                     fallback_providers=[])
     c = T.TranslationController(cfg, StubOverlay())
     c.states: list[str] = []
@@ -258,7 +258,7 @@ class TestFallbackIsAsync:
         """Stopping/starting a recognizer is 1.3–1.6 s of blocking I/O; on the
         GUI thread the operator read it as "the app hung"."""
         from dataclasses import replace as _replace
-        ctrl.config = _replace(ctrl.config, fallback_providers=["groq"])
+        ctrl.config = _replace(ctrl.config, fallback_providers=["whisper_local"])
         switched: list[tuple[str, str]] = []
         ctrl.provider_changed.connect(lambda a, b: switched.append((a, b)))
         ctrl.start()
@@ -279,14 +279,14 @@ class TestFallbackIsAsync:
         assert stopped_on and stopped_on[0] != gui_thread, (
             "the provider teardown blocked the GUI thread")
         assert ctrl.is_running()
-        assert ctrl.config.provider == "groq"
-        assert switched == [("azure", "groq")]
+        assert ctrl.config.provider == "whisper_local"
+        assert switched == [("azure", "whisper_local")]
 
     def test_failed_fallback_candidate_walks_to_the_next(self, ctrl, qapp):
         """A candidate that cannot start must not end the chain: it is marked
         tried and the NEXT candidate gets its turn."""
         ctrl.config = replace(ctrl.config,
-                              fallback_providers=["groq", "openrouter"])
+                              fallback_providers=["whisper_local", "openrouter"])
         ctrl.start()
         FakeProvider.fail_next_starts = 1     # the first swap's start() raises
 
@@ -295,7 +295,7 @@ class TestFallbackIsAsync:
 
         assert ctrl.is_running()
         assert ctrl.config.provider == "openrouter"
-        assert "groq" in ctrl._tried_fallbacks
+        assert "whisper_local" in ctrl._tried_fallbacks
         assert ctrl._last_health[0] == STATUS_OK
 
     def test_failed_swap_retries_on_a_short_backoff(self, ctrl, qapp):
@@ -430,10 +430,9 @@ class TestIsValidCoversEveryAdvertisedProvider:
         full = AppConfig(
             provider="azure",
             azure_speech_key="k", azure_speech_region="r",
-            groq_api_key="k",
             google_credentials_json="{}", google_project_id="p",
             whisper_model="small",
-            cerebras_api_key="k", openai_api_key="k",
+            openai_api_key="k",
             openrouter_api_key="k",
         )
         for name in PROVIDER_LABELS:
@@ -495,7 +494,7 @@ class TestLoadConfigRobustness:
 
     def test_audio_sub_dict_with_wrong_type_is_quarantined(self):
         config_mod.config_path().write_text(
-            '{"provider": "groq", "audio": "not-an-object"}', encoding="utf-8")
+            '{"provider": "openrouter", "audio": "not-an-object"}', encoding="utf-8")
         cfg = load_config()
         assert cfg.provider == "azure"
         assert list(config_mod.config_path().parent.glob("config.corrupt-*.json"))
@@ -504,7 +503,7 @@ class TestLoadConfigRobustness:
         """width_ratio: "0.8" (string) used to reach the overlay and explode
         the geometry math."""
         config_mod.config_path().write_text(json.dumps({
-            "provider": "groq", "groq_api_key": "k",
+            "provider": "openrouter", "openrouter_api_key": "k",
             "overlay": {"width_ratio": "0.8", "position": "top"},
         }), encoding="utf-8")
         cfg = load_config()
@@ -514,14 +513,14 @@ class TestLoadConfigRobustness:
 
     def test_one_rotten_field_does_not_take_the_others_down(self):
         config_mod.config_path().write_text(json.dumps({
-            "provider": "groq", "groq_api_key": "k",
+            "provider": "openrouter", "openrouter_api_key": "k",
             "chunk_seconds": "not-a-number",
             "target_languages": ["en"],
         }), encoding="utf-8")
         cfg = load_config()
         assert cfg.chunk_seconds == 4.0          # field default
-        assert cfg.provider == "groq"
-        assert cfg.groq_api_key == "k"
+        assert cfg.provider == "openrouter"
+        assert cfg.openrouter_api_key == "k"
         assert cfg.target_languages == ["en"]
 
 

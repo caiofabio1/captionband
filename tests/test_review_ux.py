@@ -102,8 +102,8 @@ class TestSettingsPreserveUneditedFields:
     def test_save_keeps_fallback_and_overlay_flags(self, qapp):
         from settings_window import SettingsWindow
         cfg = AppConfig(
-            provider="azure", azure_speech_key="k", groq_api_key="g",
-            fallback_providers=["groq"],
+            provider="azure", azure_speech_key="k",
+            fallback_providers=["openrouter"],
             overlay=OverlayConfig(stable_height=False, reserved_lines=5,
                                   screen_name="DISPLAY2"),
         )
@@ -113,7 +113,7 @@ class TestSettingsPreserveUneditedFields:
         finally:
             win.close()
         # Before: a fresh AppConfig(...) reset all of these to their defaults.
-        assert built.fallback_providers == ["groq"]
+        assert built.fallback_providers == ["openrouter"]
         assert built.overlay.stable_height is False
         assert built.overlay.reserved_lines == 5
         assert built.overlay.screen_name == "DISPLAY2"
@@ -165,10 +165,10 @@ class TestSettingsPreserveUneditedFields:
         from settings_window import SettingsWindow
         win = SettingsWindow(AppConfig(provider="azure", azure_speech_key="k"))
         try:
-            idx = win.fallback_combo.findData("groq")
+            idx = win.fallback_combo.findData("openrouter")
             assert idx > 0
             win.fallback_combo.setCurrentIndex(idx)
-            assert win._build_config().fallback_providers == ["groq"]
+            assert win._build_config().fallback_providers == ["openrouter"]
             win.fallback_combo.setCurrentIndex(0)
             assert win._build_config().fallback_providers == []
         finally:
@@ -332,11 +332,11 @@ class TestPreflightFallbackStep:
         import preflight
         step = preflight.check_fallback(AppConfig(
             provider="azure", azure_speech_key="k",
-            groq_api_key="g", fallback_providers=["groq"]))
+            openrouter_api_key="sk-or-k", fallback_providers=["openrouter"]))
         assert step.ok
 
     def test_warns_when_reserve_has_no_credentials(self):
         import preflight
         step = preflight.check_fallback(AppConfig(
-            provider="azure", azure_speech_key="k", fallback_providers=["groq"]))
+            provider="azure", azure_speech_key="k", fallback_providers=["openrouter"]))
         assert not step.ok and "credencial" in step.detail

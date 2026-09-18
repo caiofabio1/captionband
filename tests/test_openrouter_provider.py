@@ -43,12 +43,12 @@ def test_translation_model_returns_openrouter_model():
 
 def test_both_clients_use_openrouter_url():
     """Both STT and translation clients must point at OpenRouter."""
-    with patch("providers.groq.OpenAI") as mock_groq, \
+    with patch("providers.chunked_rest.OpenAI") as mock_base, \
          patch("providers.openrouter.OpenAI") as mock_or:
         prov = _make_provider()
         prov.start()
         # Both calls should go through openrouter module's OpenAI patch
-        # (not groq module's, since we override BOTH hooks)
+        # (not the base module's, since we override BOTH hooks)
         assert mock_or.call_count == 2  # STT + translation
         for call in mock_or.call_args_list:
             assert call.kwargs["base_url"] == OPENROUTER_BASE_URL

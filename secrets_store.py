@@ -5,7 +5,7 @@ Uses the OS-native credential manager via the `keyring` library:
 - macOS:   Keychain
 - Linux:   Secret Service / KWallet
 
-Secrets stored: groq_api_key, azure_speech_key, google_credentials_json.
+Secrets stored: azure_speech_key, google_credentials_json, openai/openrouter keys.
 The path to the Google service account JSON is stored as a separate, less
 sensitive value (config.json keeps the path; the actual JSON contents stay
 in keyring or on disk in user-only readable mode).
@@ -35,7 +35,6 @@ SERVICE = APP_NAME  # appears as "CaptionBand" in Credential Manager
 LEGACY_SERVICES = ("TeamsLiveTranslation",)
 
 SECRET_KEYS = (
-    "groq_api_key",
     "azure_speech_key",
     "google_credentials_json",
 )

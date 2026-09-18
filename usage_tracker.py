@@ -29,10 +29,7 @@ log = logging.getLogger(__name__)
 # Published rates (USD per hour of audio) — adjust as providers change pricing
 RATES_USD_PER_HOUR = {
     "azure": 2.50,             # S0 tier
-    "cerebras": 0.0,           # free tier 1M tokens/day = ~33h webinars/day
     "google": 1.54,            # Speech v2 + Translate v3 combined
-    "groq": 0.10,              # whisper-large-v3-turbo + Llama 3.3 70B
-    "openai_cerebras": 0.36,   # OpenAI Whisper-1 (~$0.006/min) + Cerebras free
     # Per session / target language (~$0.034/min Realtime API). The tracker
     # aggregates one stream per provider, so this base rate is per target;
     # the provider itself warns at start that cost multiplies per language.
@@ -43,10 +40,7 @@ RATES_USD_PER_HOUR = {
 
 FREE_TIER_HOURS_MONTH = {
     "azure": 5.0,              # F0 tier
-    "cerebras": float("inf"),
     "google": 1.0,             # 60 free minutes/month
-    "groq": 0.0,               # rate-limited but no free hour quota
-    "openai_cerebras": 0.0,    # OpenAI is paid from minute 1
     "openai_realtime": 0.0,
     "openrouter": 0.0,
     "whisper_local": float("inf"),

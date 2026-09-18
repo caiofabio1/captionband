@@ -152,7 +152,7 @@ def ctrl(qapp, monkeypatch):
     monkeypatch.setattr(T.TranslationController, "CAPTURE_RETRY_DELAYS_S",
                         (0.01, 0.01, 0.01), raising=False)
 
-    cfg = AppConfig(provider="groq", groq_api_key="k",
+    cfg = AppConfig(provider="openrouter", openrouter_api_key="k",
                     azure_speech_key="k", azure_speech_region="r",
                     fallback_providers=[])
     overlay = StubOverlay()
@@ -234,7 +234,7 @@ class TestFallbackChain:
 
         assert ctrl.is_running()
         assert ctrl.config.provider == "azure"
-        assert switched == [("groq", "azure")]
+        assert switched == [("openrouter", "azure")]
         # The session was NOT torn down: one capture, one transcript file.
         assert len(FakeCapture.instances) == 1
         assert FakeTranscript.started == 1

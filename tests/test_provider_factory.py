@@ -40,14 +40,14 @@ class TestBuildProvider:
         with pytest.raises(ValueError, match="speech_key"):
             build_provider(cfg, on_event=noop_callback)
 
-    def test_groq_built_with_api_key(self):
-        cfg = AppConfig(provider="groq", groq_api_key="gsk_test")
+    def test_openrouter_built_with_api_key(self):
+        cfg = AppConfig(provider="openrouter", openrouter_api_key="sk-or-test")
         prov = build_provider(cfg, on_event=noop_callback)
         assert isinstance(prov, TranslationProvider)
         assert not prov.is_running
 
-    def test_groq_missing_key_raises(self):
-        cfg = AppConfig(provider="groq")
+    def test_openrouter_missing_key_raises(self):
+        cfg = AppConfig(provider="openrouter")
         with pytest.raises(ValueError, match="api_key"):
             build_provider(cfg, on_event=noop_callback)
 
@@ -96,18 +96,6 @@ class TestTranslationEvent:
         assert e.translations["es"] == "buenos días"
 
 
-def test_factory_builds_cerebras(monkeypatch):
-    from config import AppConfig
-    cfg = AppConfig(
-        provider="cerebras",
-        groq_api_key="g-fake",
-        cerebras_api_key="cb-fake",
-    )
-    cfg.target_languages = ["es"]
-    from providers import build_provider
-    from providers.cerebras import CerebrasProvider
-    prov = build_provider(cfg, on_event=lambda e: None)
-    assert isinstance(prov, CerebrasProvider)
 
 
 def test_factory_builds_openrouter():

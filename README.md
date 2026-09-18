@@ -32,7 +32,7 @@ integrações — é de qualquer coisa que faça som no Windows:
 Nada disso exige permissão, plugin ou conta na plataforma de origem: para o
 Windows é só áudio saindo pela placa.
 
-- **7 provedores**: Azure / Google Speech v2 / Groq / Cerebras / OpenAI+Cerebras / OpenRouter / Whisper local (offline)
+- **5 provedores**: Azure / Google Speech v2 / OpenRouter / OpenAI Realtime / Whisper local (offline)
 - **Nunca falha em silêncio**: todo erro vira aviso na bandeja e troca de provedor automática
 - **Sobrevive ao evento**: reabre o áudio se o dispositivo mudar, reconecta o Azure, troca de provedor sem cortar a transcrição
 - **Tela da legenda** escolhida na bandeja — o projetor em modo "estender" recebe a legenda, não o notebook
@@ -73,7 +73,7 @@ flowchart LR
     TC -->|push_audio| PROV{Provider<br/>factory}
     PROV --> AZ[providers/azure.py<br/>at-start LID]
     PROV --> GG[providers/google.py<br/>Speech v2 + Translate]
-    PROV --> GR[providers/groq.py<br/>Whisper turbo + Llama]
+    PROV --> GR[providers/openrouter.py<br/>STT + traducao via 1 chave]
     PROV --> WL[providers/whisper_local.py<br/>faster-whisper + Argos]
     AZ -.->|TranslationEvent| TC
     GG -.->|TranslationEvent| TC
@@ -99,15 +99,15 @@ evento, e trate esta tabela como datada, não como permanente.
 |---|---|---|---|---|
 | **Azure Speech Translation** | garantida pelo protocolo | **F0: 5 h/mês grátis**; pago *não verificado* ¹ | ✅ nativo | 1 key |
 | **Google Speech v2 + Translate** | garantida pelo protocolo | *não verificado* ¹ | ✅ | Service Account JSON |
-| **Groq** (whisper-large-v3-turbo + Llama) | reordenada pelo app | **US$ 0,04/h** ² | ✅ 2º hop | 1 key |
-| **Cerebras / OpenAI+Cerebras / OpenRouter** | reordenada pelo app | varia | ✅ 2º hop | 1–2 keys |
+| **OpenRouter** (multimodal com áudio + LLM) | reordenada pelo app | varia ² | ✅ 2º hop | 1 key |
+| **OpenAI Realtime** | garantida pelo protocolo | varia | ✅ nativo | 1 key |
 | **Whisper local** (offline) | reordenada pelo app | **US$ 0** | ✅ Argos | modelo baixa 1x |
 
 ¹ A página de preço da Azure renderiza os valores por JavaScript e não foi
 possível ler o valor pago; o "US$ 2,50/h" que constava aqui vinha de abril/2026
 e foi removido em vez de repetido sem conferência. O free tier F0 (5 h/mês de
 Speech Translation) **está** confirmado na página.
-² `whisper-large-v3-turbo`, US$ 0,04/h, confirmado em console.groq.com/docs/models.
+² Depende do modelo escolhido. O catálogo do OpenRouter muda: o app confere, no botão **Testar conexão**, se o modelo de transcrição selecionado ainda existe.
 
 ### Qual usar num evento ao vivo
 
@@ -119,10 +119,25 @@ Speech Translation) **está** confirmado na página.
 2. **Custo**: o free tier F0 dá 5 h/mês de Speech Translation — cobre um
    evento inteiro sem gasto.
 
-Deixe **Groq** configurado como **provedor de reserva** (Configurações →
-Provedor): US$ 0,04/h é barato o bastante para ficar de reserva, e a troca é
-automática quando o Azure falha. A checagem pré-evento avisa se não houver
-nenhum.
+Deixe **OpenRouter** configurado como **provedor de reserva** (Configurações →
+Provedor): a troca é automática quando o Azure falha, e a checagem pré-evento
+avisa se não houver nenhum.
+
+### Provedores que saíram, e por quê
+
+**Groq, Cerebras e a composição OpenAI+Cerebras foram removidos em 2026-09.**
+As duas APIs recusam conexões do Brasil **antes de olhar a chave**: medido
+sem credencial nenhuma, `api.cerebras.ai` devolve `403` com `error code: 1009`
+(bloqueio geográfico do Cloudflare) e `api.groq.com` devolve `403 Forbidden`.
+Repetindo a mesma requisição por um proxy que sai de outro país, as duas
+passam a responder normalmente (`401 Invalid API Key` / `Not authenticated`),
+o que prova que o bloqueio é geográfico e não de credencial.
+
+Um provedor que não conecta não serve nem como principal nem como reserva, e
+mantê-lo na lista só criava a chance de escolhê-lo na véspera de um evento.
+Quem precisa deles a partir de outro país pode recuperá-los do histórico do
+Git; o pipeline que os servia continua no repo como
+`providers/chunked_rest.py`, que é a base do OpenRouter.
 
 Com dois idiomas de saída (EN + ES), o app grava um `.srt` por idioma —
 prontos para o YouTube — e o modo evento reserva uma linha a mais na banda.
@@ -190,12 +205,13 @@ você quer a qualidade/latência do modelo novo e aceita o custo por idioma.
 4. Após criar, abra o recurso → menu lateral **Keys and Endpoint**
 5. Copie **Key 1** e **Location/Region** → cole na janela de Configurações
 
-### Groq
+### OpenRouter
 
-1. https://console.groq.com → criar conta (grátis)
-2. **API Keys** → **Create API Key** → copia (formato `gsk_...`)
-3. Cole em Configurações → tab Provedor → Groq → API Key
-4. Modelos default: `whisper-large-v3-turbo` + `llama-3.3-70b-versatile`
+1. https://openrouter.ai/settings/keys → criar chave (formato `sk-or-v1-...`)
+2. Cole em Configurações → aba **Credenciais** → OpenRouter
+3. Aba **Provedor** → OpenRouter → escolha o **Modelo STT**
+4. **Testar conexão** — ele confere a chave *e* se o modelo de transcrição
+   escolhido ainda existe no catálogo, que muda sem aviso
 
 ### Google Speech v2 + Translate
 

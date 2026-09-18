@@ -1,7 +1,7 @@
 """Friendly settings GUI for CaptionBand.
 
 Tabs:
-- Credenciais: all API keys / credentials in one place (Azure, Groq, Cerebras, OpenAI, Google)
+- Credenciais: all API keys / credentials in one place (Azure, OpenAI, Google, OpenRouter)
 - Provedor: choose which composition to use + composition-specific settings (models, etc.)
 - Idiomas: source candidates + target languages, display mode
 - Áudio: input device picker (WASAPI loopback list)
@@ -48,8 +48,6 @@ from PyQt6.QtWidgets import (
 
 from config import (
     DISPLAY_MODES,
-    GROQ_TRANSCRIPTION_MODELS,
-    GROQ_TRANSLATION_MODELS,
     KNOWN_LANGUAGES,
     KNOWN_TARGETS,
     POSITIONS,
@@ -77,15 +75,11 @@ PROVIDER_HINTS = {
     "openrouter": (
         "OpenRouter roteia pra 200+ modelos com 1 chave só. STT via Whisper + tradução "
         "via LLM (Llama, GPT-OSS, etc). Latência ~25-40ms maior que ir direto. "
-        "Custo ~$0.40/h. Substitui Cerebras + OpenAI + Groq + Azure + Google."
+        "Custo ~$0.40/h. Uma chave no lugar de varias contas."
     ),
     "azure": (
         "Azure Speech Translation. Auto-detect até 10 idiomas. Latência ~2–3s. "
         "Custo F0 grátis (5h/mês), S0 ~US$2.50/h."
-    ),
-    "groq": (
-        "Groq usa Whisper turbo + Llama via API OpenAI-compatível. Latência ~1s. "
-        "Custo ~US$0.10/h. Auto-detect Whisper."
     ),
     "google": (
         "Google Cloud Speech v2 + Translate v3. Latência 1–2s, partials. "
@@ -94,16 +88,6 @@ PROVIDER_HINTS = {
     "whisper_local": (
         "Whisper local (faster-whisper) + Argos Translate. 100% offline. "
         "Custo zero. Latência 3–6s no CPU; 1–3s na GPU. Modelo baixa só uma vez."
-    ),
-    "cerebras": (
-        "Cerebras usa Llama 3.3 70B para tradução (ultra-rápido via chip CS-3) + "
-        "Groq Whisper para STT. Latência <0.5s. Free tier generoso. "
-        "Requer chaves Cerebras E Groq."
-    ),
-    "openai_cerebras": (
-        "OpenAI Whisper API para STT (~$0.36/h) + Cerebras Llama 3.3 70B para tradução "
-        "(free 1M tokens/dia). Composição paid-SLA recomendada para produção. "
-        "Sem dependência de Groq. Requer chaves OpenAI E Cerebras."
     ),
 }
 
@@ -271,7 +255,7 @@ class SettingsWindow(QDialog):
         or_link.setOpenExternalLinks(True)
         or_layout.addRow("", or_link)
 
-        or_note = QLabel("<small><i>Substitui Cerebras + OpenAI + Groq + Azure + Google numa única chave. Acesso a 200+ modelos. Latência ~25-40ms maior.</i></small>")
+        or_note = QLabel("<small><i>Uma chave no lugar de várias contas. Acesso a 200+ modelos. Latência ~25-40ms maior.</i></small>")
         or_note.setWordWrap(True)
         or_layout.addRow("", or_note)
 
@@ -279,19 +263,6 @@ class SettingsWindow(QDialog):
         self.openrouter_test_btn.clicked.connect(self._test_openrouter_credential)
         or_layout.addRow("", self.openrouter_test_btn)
         outer.addWidget(or_box)
-
-        # --- Cerebras ---
-        cerebras_box = self._make_credential_section(
-            title="Cerebras (LLM rápido — Llama 3.3 70B)",
-            link_text="Free tier 1M tokens/dia em inference.cerebras.ai",
-            link_url="https://inference.cerebras.ai",
-            key_attr_name="cerebras_api_key_input",
-            placeholder="csk_pk_...",
-            current_value=self.config.cerebras_api_key,
-            test_method="_test_cerebras_credential",
-            test_button_attr="cerebras_test_btn",
-        )
-        outer.addWidget(cerebras_box)
 
         # --- OpenAI ---
         openai_box = self._make_credential_section(
@@ -305,19 +276,6 @@ class SettingsWindow(QDialog):
             test_button_attr="openai_test_btn",
         )
         outer.addWidget(openai_box)
-
-        # --- Groq ---
-        groq_box = self._make_credential_section(
-            title="Groq (Whisper STT + Llama)",
-            link_text="Free tier em console.groq.com/keys",
-            link_url="https://console.groq.com/keys",
-            key_attr_name="groq_api_key_input_credentials",
-            placeholder="gsk_...",
-            current_value=self.config.groq_api_key,
-            test_method="_test_groq_credential",
-            test_button_attr="groq_test_btn",
-        )
-        outer.addWidget(groq_box)
 
         # --- Azure ---
         azure_box = QGroupBox("Azure Speech (STT + Translation combinados)")
@@ -417,14 +375,6 @@ class SettingsWindow(QDialog):
             test_func=functools.partial(test_openrouter, stt_model=stt),
         )
 
-    def _test_cerebras_credential(self) -> None:
-        from connection_test import test_cerebras
-        self._do_credential_test(
-            button=self.cerebras_test_btn,
-            title="Cerebras",
-            api_key=self.cerebras_api_key_input.text().strip(),
-            test_func=test_cerebras,
-        )
 
     def _test_openai_credential(self) -> None:
         from connection_test import test_openai_whisper
@@ -435,14 +385,6 @@ class SettingsWindow(QDialog):
             test_func=test_openai_whisper,
         )
 
-    def _test_groq_credential(self) -> None:
-        from connection_test import test_groq
-        self._do_credential_test(
-            button=self.groq_test_btn,
-            title="Groq",
-            api_key=self.groq_api_key_input_credentials.text().strip(),
-            test_func=test_groq,
-        )
 
     def _test_azure_credential(self) -> None:
         from connection_test import test_azure
@@ -528,14 +470,20 @@ class SettingsWindow(QDialog):
         self.provider_stack = QStackedWidget()
         outer.addWidget(self.provider_stack, 1)
 
-        self.provider_stack.addWidget(self._build_azure_form())          # index 0
-        self.provider_stack.addWidget(self._build_groq_form())           # index 1
-        self.provider_stack.addWidget(self._build_google_form())         # index 2
-        self.provider_stack.addWidget(self._build_whisper_form())        # index 3
-        self.provider_stack.addWidget(self._build_cerebras_form())       # index 4
-        self.provider_stack.addWidget(self._build_openai_cerebras_form())  # index 5
-        self.provider_stack.addWidget(self._build_openrouter_form())     # index 6
-        self.provider_stack.addWidget(self._build_openai_realtime_form())  # index 7
+        # A pagina de cada provedor e registrada pelo CODIGO, nao por um
+        # indice escrito a mao em dois lugares. O mapa duplicado ja existia e
+        # e a forma classica de a tela abrir o formulario errado no dia em que
+        # um provedor sai da lista.
+        self._provider_pages = {
+            code: self.provider_stack.addWidget(build())
+            for code, build in (
+                ("azure", self._build_azure_form),
+                ("google", self._build_google_form),
+                ("whisper_local", self._build_whisper_form),
+                ("openrouter", self._build_openrouter_form),
+                ("openai_realtime", self._build_openai_realtime_form),
+            )
+        }
 
         chunk_row = QFormLayout()
         self.chunk_seconds_spin = QDoubleSpinBox()
@@ -543,7 +491,7 @@ class SettingsWindow(QDialog):
         self.chunk_seconds_spin.setSingleStep(0.5)
         self.chunk_seconds_spin.setSuffix(" s")
         chunk_row.addRow(
-            "Tamanho do chunk (Groq/Whisper local):", self.chunk_seconds_spin
+            "Tamanho do chunk (OpenRouter/Whisper local):", self.chunk_seconds_spin
         )
         chunk_w = QWidget()
         chunk_w.setLayout(chunk_row)
@@ -632,28 +580,6 @@ class SettingsWindow(QDialog):
         outer.addStretch(1)
         return w
 
-    def _build_groq_form(self) -> QWidget:
-        w = QWidget()
-        layout = QFormLayout(w)
-        info = QLabel(
-            "Esta composição usa:<br>"
-            "• <b>Groq key</b> — para STT (Whisper turbo) e tradução (Llama)<br><br>"
-            "Configure a chave na aba <b>Credenciais</b>."
-        )
-        info.setWordWrap(True)
-        layout.addRow(info)
-
-        self.groq_transcription_combo = QComboBox()
-        for code, label in GROQ_TRANSCRIPTION_MODELS.items():
-            self.groq_transcription_combo.addItem(label, code)
-        layout.addRow("Modelo de transcrição:", self.groq_transcription_combo)
-
-        self.groq_translation_combo = QComboBox()
-        for code, label in GROQ_TRANSLATION_MODELS.items():
-            self.groq_translation_combo.addItem(label, code)
-        layout.addRow("Modelo de tradução:", self.groq_translation_combo)
-
-        return w
 
     def _build_google_form(self) -> QWidget:
         w = QWidget()
@@ -733,58 +659,7 @@ class SettingsWindow(QDialog):
         else:
             QMessageBox.warning(self, "Whisper local — Falha", msg)
 
-    def _build_cerebras_form(self) -> QWidget:
-        w = QWidget()
-        layout = QFormLayout(w)
-        info = QLabel(
-            "Esta composição usa:<br>"
-            "• <b>Cerebras key</b> — para tradução (Llama 3.3 70B)<br>"
-            "• <b>Groq key</b> — para STT (Whisper Turbo, free tier)<br><br>"
-            "Configure as duas na aba <b>Credenciais</b>."
-        )
-        info.setWordWrap(True)
-        layout.addRow(info)
 
-        self.cerebras_model_combo = QComboBox()
-        for model_id in ["gpt-oss-120b", "llama3.1-8b", "qwen-3-235b-a22b-instruct-2507", "zai-glm-4.7"]:
-            self.cerebras_model_combo.addItem(model_id, model_id)
-        layout.addRow("Modelo de tradução:", self.cerebras_model_combo)
-
-        return w
-
-    def _build_openai_cerebras_form(self) -> QWidget:
-        w = QWidget()
-        layout = QFormLayout(w)
-        info = QLabel(
-            "<b>Composição paid-SLA recomendada para produção.</b><br><br>"
-            "Esta composição usa:<br>"
-            "• <b>OpenAI key</b> — para STT (Whisper API, ~$0.36/h)<br>"
-            "• <b>Cerebras key</b> — para tradução (Llama 3.3 70B, free 1M tokens/dia)<br><br>"
-            "Configure as duas na aba <b>Credenciais</b>.<br>"
-            "<small>Sem dependência de Groq.</small>"
-        )
-        info.setWordWrap(True)
-        layout.addRow(info)
-
-        self.openai_stt_model_combo = QComboBox()
-        # whisper-1 = original, $0.006/min; gpt-4o-transcribe = full quality;
-        # gpt-4o-mini-transcribe = cheaper smaller variant, similar accuracy
-        for m in ["whisper-1", "gpt-4o-mini-transcribe", "gpt-4o-transcribe"]:
-            self.openai_stt_model_combo.addItem(m, m)
-        idx = self.openai_stt_model_combo.findData(self.config.openai_stt_model)
-        if idx >= 0:
-            self.openai_stt_model_combo.setCurrentIndex(idx)
-        layout.addRow("Modelo STT:", self.openai_stt_model_combo)
-
-        self.openai_cerebras_translation_model_combo = QComboBox()
-        for m in ["gpt-oss-120b", "llama3.1-8b", "qwen-3-235b-a22b-instruct-2507", "zai-glm-4.7"]:
-            self.openai_cerebras_translation_model_combo.addItem(m, m)
-        idx = self.openai_cerebras_translation_model_combo.findData(self.config.cerebras_translation_model)
-        if idx >= 0:
-            self.openai_cerebras_translation_model_combo.setCurrentIndex(idx)
-        layout.addRow("Modelo tradução:", self.openai_cerebras_translation_model_combo)
-
-        return w
 
     def _build_openai_realtime_form(self) -> QWidget:
         """No credential fields of its own — it uses the OpenAI key from the
@@ -1123,7 +998,7 @@ class SettingsWindow(QDialog):
         self.max_history_spin.setSuffix(" linha(s)")
         self.max_history_spin.setToolTip(
             "0 = só a legenda atual. 1-5 = mostra também as anteriores dimmed.\n"
-            "Recomendado: 1 com Azure Streaming, 2 com Groq/Whisper."
+            "Recomendado: 1 com Azure Streaming, 2 com OpenRouter/Whisper."
         )
         layout.addRow("Linhas anteriores visíveis:", self.max_history_spin)
 
@@ -1133,7 +1008,7 @@ class SettingsWindow(QDialog):
         self.concat_gap_spin.setSingleStep(250)
         self.concat_gap_spin.setSuffix(" ms")
         self.concat_gap_spin.setToolTip(
-            "Gap máximo para juntar duas falas curtas em uma linha (Groq/Whisper).\n"
+            "Gap máximo para juntar duas falas curtas em uma linha (OpenRouter/Whisper).\n"
             "0 desativa. Azure Streaming ignora este valor — sempre cria linha nova."
         )
         layout.addRow("Auto-concat gap:", self.concat_gap_spin)
@@ -1203,6 +1078,13 @@ class SettingsWindow(QDialog):
         self.layout_combo.currentIndexChanged.connect(
             lambda _i: self.second_position_combo.setEnabled(
                 self.layout_combo.currentData() == "split"))
+        # A posicao da 1a banda sai da lista da 2a: duas bandas no mesmo lugar
+        # ficam 100% sobrepostas e lem como UMA caixa com os idiomas
+        # empilhados. Oferecer a opcao e depois corrigi-la no backend faria a
+        # tela mentir sobre o que vai acontecer; entao ela nao e oferecida.
+        self.position_combo.currentIndexChanged.connect(
+            lambda _i: self._sync_second_position_choices())
+        self._sync_second_position_choices()
 
         self.screen_combo = QComboBox()
         self._populate_screens()
@@ -1268,7 +1150,7 @@ class SettingsWindow(QDialog):
         layout = QVBoxLayout(w)
         layout.addWidget(QLabel(f"<h3>CaptionBand v{APP_VERSION}</h3>"))
         layout.addWidget(QLabel(
-            "Tradução simultânea de webinars no Teams via Azure / Groq / "
+            "Tradução simultânea de webinars no Teams via Azure / OpenRouter / "
             "Google Speech / Whisper local."
         ))
 
@@ -1322,17 +1204,7 @@ class SettingsWindow(QDialog):
 
     def _on_provider_changed(self, idx: int) -> None:
         code = self.provider_combo.itemData(idx)
-        provider_indices = {
-            "azure": 0,
-            "groq": 1,
-            "google": 2,
-            "whisper_local": 3,
-            "cerebras": 4,
-            "openai_cerebras": 5,
-            "openrouter": 6,
-            "openai_realtime": 7,
-        }
-        self.provider_stack.setCurrentIndex(provider_indices.get(code, 0))
+        self.provider_stack.setCurrentIndex(self._provider_pages.get(code, 0))
         self.provider_hint.setText(PROVIDER_HINTS.get(code, ""))
 
     def _populate_devices(self) -> None:
@@ -1358,9 +1230,7 @@ class SettingsWindow(QDialog):
 
         # Credenciais tab inputs
         self.openrouter_api_key_input.setText(self.config.openrouter_api_key)
-        self.cerebras_api_key_input.setText(self.config.cerebras_api_key)
         self.openai_api_key_input.setText(self.config.openai_api_key)
-        self.groq_api_key_input_credentials.setText(self.config.groq_api_key)
         self.azure_key_input_credentials.setText(self.config.azure_speech_key)
         self.azure_region_input_credentials.setText(self.config.azure_speech_region)
         self.google_creds_input_credentials.setText(self.config.google_credentials_json)
@@ -1378,17 +1248,6 @@ class SettingsWindow(QDialog):
         self.azure_switch_hotkey_input.setText(self.config.azure_switch_hotkey or "")
 
         # Provedor tab model combos
-        idx = self.groq_transcription_combo.findData(self.config.groq_transcription_model)
-        if idx >= 0:
-            self.groq_transcription_combo.setCurrentIndex(idx)
-        idx = self.groq_translation_combo.findData(self.config.groq_translation_model)
-        if idx >= 0:
-            self.groq_translation_combo.setCurrentIndex(idx)
-
-        idx = self.cerebras_model_combo.findData(self.config.cerebras_translation_model)
-        if idx >= 0:
-            self.cerebras_model_combo.setCurrentIndex(idx)
-
         idx = self.openrouter_stt_model_combo.findData(self.config.openrouter_stt_model)
         if idx >= 0:
             self.openrouter_stt_model_combo.setCurrentIndex(idx)
@@ -1441,6 +1300,9 @@ class SettingsWindow(QDialog):
         self.second_position_combo.setCurrentIndex(
             max(0, self.second_position_combo.findData(ov.second_position or "top")))
         self.second_position_combo.setEnabled(bool(ov.split_languages))
+        # Um config.json que ja traz as duas caixas na mesma posicao cai aqui:
+        # sem este sync a tela abriria mostrando a escolha conflitante.
+        self._sync_second_position_choices()
         idx = self.screen_combo.findData(ov.screen_name or "")
         if idx < 0 and ov.screen_name:
             # Configured monitor not plugged in right now: keep the choice.
@@ -1464,15 +1326,6 @@ class SettingsWindow(QDialog):
 
     def _build_config(self) -> AppConfig:
         current_provider = self.provider_combo.currentData() or "azure"
-        # cerebras_translation_model: prefer the combo for the active provider
-        if current_provider == "openai_cerebras":
-            cerebras_translation_model = (
-                self.openai_cerebras_translation_model_combo.currentData() or "gpt-oss-120b"
-            )
-        else:
-            cerebras_translation_model = (
-                self.cerebras_model_combo.currentData() or "gpt-oss-120b"
-            )
         # Start from the CURRENT config, not a blank AppConfig: any field this
         # window has no widget for (fallback_providers, stable_height, …) must
         # survive a save. Building from scratch silently reset the fallback
@@ -1497,13 +1350,7 @@ class SettingsWindow(QDialog):
                 if self.azure_quick_langs_list.item(i).isSelected()
             ] or ["pt-BR", "en-US", "es-ES"],
             azure_switch_hotkey=self.azure_switch_hotkey_input.text().strip().lower(),
-            groq_api_key=self.groq_api_key_input_credentials.text().strip(),
-            groq_transcription_model=self.groq_transcription_combo.currentData() or "whisper-large-v3-turbo",
-            groq_translation_model=self.groq_translation_combo.currentData() or "llama-3.3-70b-versatile",
-            cerebras_api_key=self.cerebras_api_key_input.text().strip(),
-            cerebras_translation_model=cerebras_translation_model,
             openai_api_key=self.openai_api_key_input.text().strip(),
-            openai_stt_model=self.openai_stt_model_combo.currentData() or "whisper-1",
             google_credentials_json=self.google_creds_input_credentials.text().strip(),
             google_project_id=self.google_project_input_credentials.text().strip(),
             google_location=self.google_location_edit.text().strip() or "global",
@@ -1546,6 +1393,20 @@ class SettingsWindow(QDialog):
 
     # The preview band closes itself after this long.
     PREVIEW_MS = 8000
+
+    def _sync_second_position_choices(self) -> None:
+        """Grey out, in the second box's list, wherever the first band sits."""
+        taken = self.position_combo.currentData()
+        model = self.second_position_combo.model()
+        for i in range(self.second_position_combo.count()):
+            item = model.item(i)
+            if item is not None:
+                item.setEnabled(self.second_position_combo.itemData(i) != taken)
+        if self.second_position_combo.currentData() == taken:
+            for i in range(self.second_position_combo.count()):
+                if self.second_position_combo.itemData(i) != taken:
+                    self.second_position_combo.setCurrentIndex(i)
+                    break
 
     def _on_preview(self) -> None:
         """Show ONE preview band with the current (unsaved) appearance.

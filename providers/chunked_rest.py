@@ -1,17 +1,21 @@
-"""Groq provider — Whisper-large-v3-turbo + Llama for translation.
+"""Base for providers that transcribe and translate over chunked REST calls.
 
-Groq exposes an OpenAI-compatible API at https://api.groq.com/openai/v1.
-We use the official OpenAI Python SDK (with base_url override) to avoid
-Cloudflare's bot/browser-fingerprint filter that blocks raw urllib requests.
+This was `groq.py`. Groq was removed in 2026-09 because its API refuses
+connections from Brazil before it even looks at the key (HTTP 403; the same
+request through a foreign exit answers 401), so it could never serve a CABSIN
+event. The pipeline it carried is provider-agnostic and OpenRouter is built on
+it, so the module stayed and lost the branding.
+
+There is deliberately NO default base_url: a subclass that forgets to say
+where its API lives should fail loudly at construction, not silently send the
+event's audio to whatever host used to be hardcoded here.
 
 Pipeline:
-  audio chunk (VAD-segmented) → /audio/transcriptions (whisper-large-v3-turbo)
-                              → text + detected language
-                              → /chat/completions (llama-3.3-70b) prompt: "Translate to {target}"
+  audio chunk (VAD-segmented) → /audio/transcriptions → text + detected language
+                              → /chat/completions ("Translate to {target}")
                               → translated text per target language
 
-Latency: ~700ms–1.5s per utterance
-Cost (Apr 2026): ~$0.04/h Whisper turbo + ~$0.06/h Llama → ~$0.10/h total
+Latency: ~700ms–1.5s per utterance.
 """
 from __future__ import annotations
 
@@ -39,8 +43,6 @@ from .base import (
 log = logging.getLogger(__name__)
 
 
-GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-
 # How much of the previous transcript to hand Whisper as context. The REST
 # transcription endpoint is stateless, so the 300 ms of audio the buffer
 # carries across a forced flush gets transcribed twice unless we tell the
@@ -49,14 +51,14 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 STT_CONTEXT_CHARS = 200
 
 
-class GroqProvider(TranslationProvider):
+class ChunkedRestProvider(TranslationProvider):
     # Chunked REST: results race each other through the thread pool, so the
     # controller must run them through the reorder gate.
     CAPABILITIES = ProviderCapabilities(
         ordered_by_protocol=False,
         translates=True,      # via a second hop to the chat model
         streaming=False,
-        label="Groq (Whisper turbo + Llama)",
+        label="Chunked REST (transcricao + traducao em duas chamadas)",
     )
 
     # Backpressure cap: how many chunks may sit QUEUED (submitted but not yet
@@ -82,7 +84,7 @@ class GroqProvider(TranslationProvider):
         chunk_seconds: float = 4.0,
     ):
         if not api_key:
-            raise ValueError("Groq api_key required")
+            raise ValueError("api_key required")
         self.api_key = api_key
         self.transcription_model = transcription_model or "whisper-large-v3-turbo"
         self.translation_model = translation_model or "llama-3.3-70b-versatile"
@@ -125,13 +127,13 @@ class GroqProvider(TranslationProvider):
             self._client = self._stt_client
             # 5 workers handle ~2s chunks at ~1.5s each => can sustain
             # continuous speech without backlog.
-            self._executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix="groq-worker")
+            self._executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix="stt-worker")
             # Separate pool for the translation fan-out: a _process_chunk
             # worker must never wait on the SAME pool it runs in (a 5-worker
             # pool with 5 chunks waiting on their own fan-outs deadlocks).
             self._translation_pool = ThreadPoolExecutor(
                 max_workers=max(2, len(self.target_languages)),
-                thread_name_prefix="groq-translate",
+                thread_name_prefix="translate",
             )
             with self._pending_lock:
                 self._pending = []
@@ -152,7 +154,7 @@ class GroqProvider(TranslationProvider):
             self._context_lock = threading.Lock()
             self._running = True
             log.info(
-                "groq provider started: stt_model=%s translate_model=%s max_chunk=%.1fs",
+                "chunked-REST provider started: stt_model=%s translate_model=%s max_chunk=%.1fs",
                 self.transcription_model,
                 self.translation_model,
                 self._buffer.max_speech_samples / self.samplerate,
@@ -180,7 +182,7 @@ class GroqProvider(TranslationProvider):
             self._translation_client = None
             self._client = None
             self._running = False
-            log.info("groq provider stopped")
+            log.info("chunked-REST provider stopped")
 
     def push_audio(self, audio_bytes: bytes) -> None:
         if self._buffer is not None:
@@ -219,7 +221,7 @@ class GroqProvider(TranslationProvider):
                     dropped.append(old_seq)
         for old_seq in dropped:
             log.warning(
-                "groq backlog: dropping queued chunk seq=%s "
+                "backlog: dropping queued chunk seq=%s "
                 "(processing is slower than speech)", old_seq)
             self._release_empty(old_seq)
         if dropped:
@@ -267,11 +269,11 @@ class GroqProvider(TranslationProvider):
                 self._release_empty(seq)
                 return
             if self._is_likely_hallucination(text):
-                log.info("groq dropping likely hallucination: %r", text[:80])
+                log.info("dropping likely hallucination: %r", text[:80])
                 self._release_empty(seq)
                 return
 
-            log.info("groq STT [seq=%s] in %.0fms: lang=%s text=%r",
+            log.info("STT [seq=%s] in %.0fms: lang=%s text=%r",
                      seq, stt_dt, detected, text[:80])
 
             with self._context_lock:
@@ -303,7 +305,7 @@ class GroqProvider(TranslationProvider):
             ))
             self.report_ok()
         except Exception as exc:
-            log.exception("groq processing failed (seq=%s)", seq)
+            log.exception("processing failed (seq=%s)", seq)
             self.report_exception(exc, "process_chunk")
             self._release_empty(seq)
 
@@ -364,35 +366,23 @@ class GroqProvider(TranslationProvider):
         return False
 
     def _build_stt_client(self):
-        """Override in subclasses to route STT to a different API.
+        """Where this provider's transcription endpoint lives. Subclasses say.
 
-        Uses the module-level OpenAI global (not a local import) so tests
-        can patch providers.groq.OpenAI and so start()'s
-        `OpenAI is None` guard actually protects this call.
+        Uses the module-level OpenAI global (not a local import) so tests can
+        patch providers.chunked_rest.OpenAI and so start()'s `OpenAI is None`
+        guard actually protects this call.
         """
-        return OpenAI(
-            api_key=self.api_key,
-            base_url=GROQ_BASE_URL,
-            timeout=30.0,
-            max_retries=2,
-        )
+        raise NotImplementedError(
+            f"{type(self).__name__} nao definiu _build_stt_client()")
 
     def _stt_model_for_call(self) -> str:
         """Override in subclasses to use a different STT model name."""
         return self.transcription_model
 
     def _build_translation_client(self):
-        """Override in subclasses to route translation to a different API.
-
-        Same reasoning as _build_stt_client: module-level global, not a
-        local import.
-        """
-        return OpenAI(
-            api_key=self.api_key,
-            base_url=GROQ_BASE_URL,
-            timeout=30.0,
-            max_retries=2,
-        )
+        """Where this provider's chat endpoint lives. Subclasses say."""
+        raise NotImplementedError(
+            f"{type(self).__name__} nao definiu _build_translation_client()")
 
     def _translation_model_for_call(self) -> str:
         """Override in subclasses to use a different model name."""

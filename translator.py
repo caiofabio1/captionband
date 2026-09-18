@@ -169,10 +169,21 @@ def split_overlay_configs(cfg: AppConfig) -> tuple[AppConfig, AppConfig | None]:
         display_mode="original_plus_translation" if keep_original else "translations_only",
         overlay=replace(cfg.overlay, reserved_lines=3 if keep_original else 2),
     )
+    # A 2a caixa NAO pode cair na mesma posicao da 1a. Medido em 2026-09-18:
+    # a UI oferece as 9 combinacoes de (posicao, posicao da 2a caixa) e as 3
+    # da diagonal sobrepoem as bandas em 100% -- duas janelas exatamente uma
+    # sobre a outra, que na tela lem como UMA caixa com os idiomas empilhados.
+    # Foi assim que o operador reportou "configuro as 2 caixas e so aparece 1
+    # e empilhada". O guard vive aqui, e nao na janela de Configuracoes,
+    # porque este e o unico ponto por onde o preview, o runtime e um
+    # config.json editado a mao passam.
+    second_position = cfg.overlay.second_position or "top"
+    if second_position == cfg.overlay.position:
+        second_position = "top" if cfg.overlay.position != "top" else "bottom"
     second = replace(
         cfg, target_languages=targets[1:],
         display_mode="translations_only_multi" if len(targets) > 2 else "translations_only",
-        overlay=replace(cfg.overlay, position=cfg.overlay.second_position or "top",
+        overlay=replace(cfg.overlay, position=second_position,
                         reserved_lines=2 * max(1, len(targets) - 1)),
     )
     return first, second

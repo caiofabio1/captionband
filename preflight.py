@@ -76,15 +76,11 @@ def check_credentials(cfg) -> Step:
     try:
         if name == "azure":
             ok, msg = ct.test_azure(cfg.azure_speech_key, cfg.azure_speech_region)
-        elif name == "groq":
-            ok, msg = ct.test_groq(cfg.groq_api_key)
         elif name == "google":
             ok, msg = ct.test_google(
                 cfg.google_credentials_json, cfg.google_project_id, cfg.google_location
             )
-        elif name == "cerebras":
-            ok, msg = ct.test_cerebras(cfg.cerebras_api_key)
-        elif name in ("openai_cerebras", "openai_realtime"):
+        elif name == "openai_realtime":
             # Same OpenAI credential. The realtime translate endpoint has no
             # cheap probe of its own, so we validate the key against the
             # models endpoint — a valid key there is a necessary condition,

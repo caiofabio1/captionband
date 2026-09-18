@@ -569,7 +569,7 @@ class TestConfigSurvivesAnInterruptedWrite:
         save_config(AppConfig(provider="azure", azure_speech_key="k"))
         first = (isolated / "config.json").read_text(encoding="utf-8")
         monkeypatch.setattr(config_mod.os, "replace", spy)
-        save_config(AppConfig(provider="groq", groq_api_key="k"))
+        save_config(AppConfig(provider="openrouter", openrouter_api_key="k"))
         assert seen["dst_before"] == first, (
             "the real file was being mutated in place instead of swapped")
 
@@ -704,7 +704,7 @@ class TestRenameDoesNotOrphanTheOperator:
 
         legacy = tmp_path / "TeamsLiveTranslation"
         legacy.mkdir()
-        (legacy / "config.json").write_text('{"provider": "groq"}', encoding="utf-8")
+        (legacy / "config.json").write_text('{"provider": "openrouter"}', encoding="utf-8")
         current = tmp_path / "CaptionBand"
         current.mkdir()
         (current / "config.json").write_text('{"provider": "azure"}', encoding="utf-8")

@@ -7,10 +7,10 @@ provider uses OpenRouter for both:
        (OpenRouter does NOT accept multipart audio uploads — they reject the
         OpenAI SDK's audio.transcriptions.create() with a JSON parse error.
         Their documented audio path is base64-in-message via chat completions.)
-- Translation: openai/gpt-oss-* / meta-llama/* / cerebras/* via /chat/completions
+- Translation: openai/gpt-oss-* / meta-llama/* via /chat/completions
 
 Trade-off vs going direct to providers:
-+ 1 API key replaces 5 (Cerebras, OpenAI, Groq, etc.)
++ 1 API key replaces several accounts
 + Built-in failover (OpenRouter routes to fallback if primary down)
 + Easy to swap models without re-cadastrar contas
 - ~25-40ms added latency per call (proxy hop)
@@ -31,7 +31,7 @@ from .base import (
     OnTranslationCallback,
     ProviderCapabilities,
 )
-from .groq import GroqProvider
+from .chunked_rest import ChunkedRestProvider
 
 log = logging.getLogger(__name__)
 
@@ -46,10 +46,10 @@ except ImportError:
     OpenAI = None
 
 
-class OpenRouterProvider(GroqProvider):
+class OpenRouterProvider(ChunkedRestProvider):
     """Single-key provider: STT + translation both via OpenRouter."""
 
-    # Inherits GroqProvider's chunked REST pipeline, so results can
+    # Inherits ChunkedRestProvider's chunked REST pipeline, so results can
     # race: the reorder gate stays on. Declared explicitly rather than
     # inherited so the operator UI shows THIS provider, not Groq.
     CAPABILITIES = ProviderCapabilities(
@@ -72,7 +72,7 @@ class OpenRouterProvider(GroqProvider):
     ):
         if not openrouter_api_key:
             raise ValueError("openrouter_api_key required")
-        # Pass openrouter_api_key as api_key — GroqProvider's start() will call
+        # Pass openrouter_api_key as api_key — ChunkedRestProvider's start() will call
         # our _build_stt_client which uses the OpenRouter URL. The transcription_model
         # and translation_model on the parent class are unused here because we
         # override the model-name hooks too.

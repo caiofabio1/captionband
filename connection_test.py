@@ -50,31 +50,6 @@ def test_azure(speech_key: str, region: str) -> tuple[bool, str]:
         return False, f"Erro: {exc}"
 
 
-def test_groq(api_key: str) -> tuple[bool, str]:
-    if not api_key:
-        return False, "API Key vazia."
-    try:
-        from openai import OpenAI
-
-        client = OpenAI(
-            api_key=api_key,
-            base_url="https://api.groq.com/openai/v1",
-            timeout=8.0,
-            max_retries=0,
-        )
-        models = list(client.models.list().data)
-        if not models:
-            return False, "Conexão OK mas nenhum modelo retornado."
-        return True, f"OK — {len(models)} modelos disponíveis (ex.: {models[0].id})."
-    except Exception as exc:
-        msg = str(exc).lower()
-        if "401" in msg or "unauthor" in msg:
-            return False, "API Key inválida (401)."
-        if "403" in msg or "forbidden" in msg:
-            return False, "Acesso negado (403)."
-        if "rate" in msg or "429" in msg:
-            return False, "Rate limit atingido (429). Aguarde 1 minuto."
-        return False, f"Erro: {exc}"
 
 
 def test_google(credentials_json: str, project_id: str, location: str = "global") -> tuple[bool, str]:
@@ -133,32 +108,6 @@ def test_google(credentials_json: str, project_id: str, location: str = "global"
                 pass
 
 
-def test_cerebras(api_key: str) -> tuple[bool, str]:
-    """Smoke-test Cerebras API key by listing available models.
-
-    Doesn't depend on any specific model — robust against deprecations.
-    """
-    if not api_key:
-        return False, "API key vazia. Pegue grátis em inference.cerebras.ai"
-    try:
-        from openai import OpenAI
-    except ImportError:
-        return False, "Pacote 'openai' não instalado."
-    try:
-        client = OpenAI(
-            api_key=api_key,
-            base_url="https://api.cerebras.ai/v1",
-            timeout=10.0,
-        )
-        models = client.models.list()
-        names = [m.id for m in models.data] if hasattr(models, 'data') else []
-        if not names:
-            return True, "OK · auth válida (lista de modelos vazia)"
-        preview = ", ".join(names[:3])
-        suffix = f" (+{len(names) - 3} outros)" if len(names) > 3 else ""
-        return True, f"OK · {len(names)} modelos: {preview}{suffix}"
-    except Exception as exc:
-        return False, f"Falhou: {exc!s}"
 
 
 def test_openai_whisper(api_key: str) -> tuple[bool, str]:

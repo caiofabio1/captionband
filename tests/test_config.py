@@ -45,15 +45,15 @@ class TestRoundTrip:
 
     def test_save_then_load_preserves_provider_choice(self, isolated_config):
         cfg = AppConfig(
-            provider="groq",
-            groq_api_key="gsk_test_key",
+            provider="openrouter",
+            openrouter_api_key="sk-or-test",
             source_languages=["pt-BR", "en-US"],
             target_languages=["es"],
         )
         save_config(cfg)
         loaded = load_config()
-        assert loaded.provider == "groq"
-        assert loaded.groq_api_key == "gsk_test_key"
+        assert loaded.provider == "openrouter"
+        assert loaded.openrouter_api_key == "sk-or-test"
         assert loaded.source_languages == ["pt-BR", "en-US"]
         assert loaded.target_languages == ["es"]
 
@@ -97,9 +97,6 @@ class TestValidation:
             azure_speech_region="brazilsouth",
         ).is_valid()
 
-    def test_groq_requires_only_api_key(self):
-        assert not AppConfig(provider="groq").is_valid()
-        assert AppConfig(provider="groq", groq_api_key="gsk_x").is_valid()
 
     def test_google_requires_creds_and_project(self):
         assert not AppConfig(provider="google").is_valid()
@@ -136,12 +133,6 @@ class TestForwardCompatibility:
         assert cfg.overlay.position == "bottom"
 
 
-def test_config_loads_cerebras_defaults(tmp_path, monkeypatch):
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    from config import AppConfig, load_config
-    cfg = load_config()
-    assert cfg.cerebras_api_key == ""
-    assert cfg.cerebras_translation_model == "gpt-oss-120b"
 
 
 # test_overlay_config_new_fields_default removed in v0.5 — those fields

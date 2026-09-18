@@ -132,15 +132,9 @@ class AppConfig:
     # Global hotkey that cycles through azure_quick_languages. Empty = disabled.
     azure_switch_hotkey: str = "f9"
 
-    groq_api_key: str = ""
-    groq_transcription_model: str = "whisper-large-v3-turbo"
-    groq_translation_model: str = "llama-3.3-70b-versatile"
 
-    cerebras_api_key: str = ""
-    cerebras_translation_model: str = "gpt-oss-120b"
 
     openai_api_key: str = ""
-    openai_stt_model: str = "whisper-1"
 
     openrouter_api_key: str = ""
     openrouter_stt_model: str = "google/gemini-3.5-flash-lite"
@@ -173,16 +167,10 @@ class AppConfig:
             return False
         if self.provider == "azure":
             return bool(self.azure_speech_key and self.azure_speech_region)
-        if self.provider == "groq":
-            return bool(self.groq_api_key)
         if self.provider == "google":
             return bool(self.google_credentials_json and self.google_project_id)
         if self.provider == "whisper_local":
             return bool(self.whisper_model)
-        if self.provider == "cerebras":
-            return bool(self.cerebras_api_key and self.groq_api_key)
-        if self.provider == "openai_cerebras":
-            return bool(self.openai_api_key and self.cerebras_api_key)
         if self.provider == "openrouter":
             return bool(self.openrouter_api_key)
         if self.provider == "openai_realtime":
@@ -248,21 +236,9 @@ WHISPER_COMPUTE_TYPES = {
     "float32": "float32 (qualidade máxima, lento)",
 }
 
-GROQ_TRANSCRIPTION_MODELS = {
-    "whisper-large-v3-turbo": "Whisper Large v3 Turbo (rápido, recomendado)",
-    "whisper-large-v3": "Whisper Large v3 (mais preciso)",
-}
-
-GROQ_TRANSLATION_MODELS = {
-    "llama-3.3-70b-versatile": "Llama 3.3 70B (qualidade)",
-    "llama-3.1-8b-instant": "Llama 3.1 8B (rápido)",
-    "openai/gpt-oss-120b": "GPT-OSS 120B (top quality)",
-}
-
-
 SECRET_FIELDS = (
-    "groq_api_key", "azure_speech_key", "google_credentials_json",
-    "cerebras_api_key", "openai_api_key", "openrouter_api_key",
+    "azure_speech_key", "google_credentials_json",
+    "openai_api_key", "openrouter_api_key",
 )
 
 
