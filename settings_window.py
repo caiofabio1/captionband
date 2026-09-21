@@ -787,9 +787,94 @@ class SettingsWindow(QDialog):
         self._refresh_openai_realtime_cost()
         outer.addWidget(targets_group)
 
+        vocab_group = QGroupBox("Vocabulário do evento")
+        vg = QFormLayout(vocab_group)
+        vg.addRow(self._wrap_label(
+            "Termos que o reconhecimento costuma errar: nomes próprios, siglas, "
+            "termos da área. Um por linha, num arquivo de texto.<br>"
+            "<b>Corrige o que é OUVIDO</b>, não como o termo é traduzido — e é a "
+            "metade que mais importa, porque palavra mal ouvida gera tradução "
+            "ruim de qualquer jeito.<br>"
+            "<small>A lista é enviada quando o reconhecimento começa. Edite entre "
+            "sessões, não durante uma fala.</small>"))
+
+        self.vocabulary_weight_spin = QDoubleSpinBox()
+        self.vocabulary_weight_spin.setRange(0.0, 2.0)
+        self.vocabulary_weight_spin.setSingleStep(0.1)
+        self.vocabulary_weight_spin.setDecimals(1)
+        self.vocabulary_weight_spin.setSpecialValueText("desligado")
+        self.vocabulary_weight_spin.setToolTip(
+            "Quanto o vocabulário pesa contra o dicionário padrão do serviço.\n"
+            "0 desliga, 1.0 é o padrão da Azure, 2.0 é o máximo. Vale para a "
+            "lista inteira, não por termo.\n"
+            "Peso alto faz o serviço preferir seus termos — inclusive quando a "
+            "pessoa não disse nenhum deles.")
+        vg.addRow("Peso:", self.vocabulary_weight_spin)
+
+        self.vocabulary_count_label = QLabel()
+        vg.addRow("Termos:", self.vocabulary_count_label)
+
+        vocab_btn = QPushButton("Abrir vocabulário para editar")
+        vocab_btn.clicked.connect(self._open_vocabulary_file)
+        vg.addRow(vocab_btn)
+        outer.addWidget(vocab_group)
 
         outer.addStretch(1)
         return w
+
+    @staticmethod
+    def _wrap_label(html: str) -> QLabel:
+        label = QLabel(html)
+        label.setWordWrap(True)
+        label.setStyleSheet("color: #888;")
+        return label
+
+    def _refresh_vocabulary_count(self) -> None:
+        """How many terms the file actually yields, read from disk.
+
+        Counting here rather than trusting a remembered number: the operator
+        edits the file in Notepad behind the app's back, and a stale count is
+        the kind of thing that makes someone believe a term was added when the
+        line was commented out.
+        """
+        from config import vocabulary_path
+        from vocabulary import MAX_PHRASES, load_terms
+
+        path = vocabulary_path()
+        if not path.exists():
+            self.vocabulary_count_label.setText(
+                "nenhum ainda — o arquivo é criado ao abrir")
+            return
+        termos = load_terms(path)
+        aviso = ""
+        if len(termos) > MAX_PHRASES:
+            aviso = f"  ⚠ acima do limite de {MAX_PHRASES} da Azure"
+        self.vocabulary_count_label.setText(f"{len(termos)}{aviso}")
+
+    def _open_vocabulary_file(self) -> None:
+        import os
+        import subprocess
+
+        from config import vocabulary_path
+        from vocabulary import ensure_file
+
+        path = vocabulary_path()
+        ensure_file(path)
+        if not path.exists():
+            QMessageBox.warning(
+                self, "Vocabulário",
+                f"Não foi possível criar o arquivo em:\n{path}")
+            return
+        try:
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        except Exception:
+            try:
+                subprocess.Popen(["notepad.exe", str(path)])
+            except Exception as exc:
+                QMessageBox.warning(self, "Vocabulário",
+                                    f"Abra à mão:\n{path}\n\n{exc}")
+                return
+        self._refresh_vocabulary_count()
 
     def _build_audio_tab(self) -> QWidget:
         w = QWidget()
@@ -1268,6 +1353,8 @@ class SettingsWindow(QDialog):
             it = self.azure_quick_langs_list.item(i)
             it.setSelected(it.data(Qt.ItemDataRole.UserRole) in quick)
         self.azure_switch_hotkey_input.setText(self.config.azure_switch_hotkey or "")
+        self.vocabulary_weight_spin.setValue(float(self.config.vocabulary_weight))
+        self._refresh_vocabulary_count()
 
         # Provedor tab model combos
         idx = self.openrouter_stt_model_combo.findData(self.config.openrouter_stt_model)
@@ -1357,6 +1444,7 @@ class SettingsWindow(QDialog):
         return replace(
             self.config,
             fallback_providers=[fallback] if fallback else [],
+            vocabulary_weight=self.vocabulary_weight_spin.value(),
             provider=current_provider,
             openrouter_api_key=self.openrouter_api_key_input.text().strip(),
             openrouter_stt_model=self.openrouter_stt_model_combo.currentData() or "openai/whisper-1",

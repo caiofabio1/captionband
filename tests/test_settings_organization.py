@@ -150,8 +150,14 @@ class TestCortarFalaLonga:
         from PyQt6.QtWidgets import QLabel
         rotulos = [x.text() for x in win.findChildren(QLabel)]
         assert any("Cortar fala acima de" in r for r in rotulos)
-        assert not any("por linha" in r for r in rotulos), (
-            "o rotulo voltou a prometer quebra de linha")
+        # A asserção original proibia a frase "por linha" em QUALQUER rótulo
+        # da janela, e quebrou no dia em que o vocabulário do evento ganhou um
+        # rótulo que a usa corretamente ("Um por linha, num arquivo"). O que
+        # não pode voltar é o rótulo errado deste campo, não a frase.
+        assert not any("Máximo por linha" in r for r in rotulos), (
+            "o rótulo voltou a prometer quebra de linha")
+        assert not any("por linha" in r for r in rotulos
+                       if "Cortar" in r or "caracter" in r.lower())
 
     def test_o_overlay_realmente_corta_e_mantem_o_final(self, qapp):
         """Nao basta gravar o numero: o texto exibido tem de mudar."""

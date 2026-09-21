@@ -24,6 +24,7 @@ because there is no fixture to forget.
 """
 from __future__ import annotations
 
+import importlib
 import importlib.util
 
 import pytest
@@ -37,9 +38,23 @@ def module_available(name: str) -> bool:
     so callers must not use it bare.
     """
     try:
-        return importlib.util.find_spec(name) is not None
+        if importlib.util.find_spec(name) is None:
+            return False
     except ModuleNotFoundError:
         return False
+    # find_spec only proves the package is ON DISK. It can still be unusable:
+    # on 2026-09-21 pydantic-core 2.49.0 landed in the user's global
+    # site-packages while pydantic 2.13.5 required 2.46.5, and `import openai`
+    # raised SystemError -- not ImportError. find_spec said yes, the import
+    # died, and the suite reported FAILED for tests that had simply never run.
+    # "could not test" is not "failed"; actually import it.
+    try:
+        importlib.import_module(name)
+    except Exception as exc:
+        print(f"[conftest] {name} esta instalado mas nao importa: "
+              f"{type(exc).__name__}: {exc}")
+        return False
+    return True
 
 
 HAS_AZURE = module_available("azure.cognitiveservices.speech")
@@ -49,7 +64,8 @@ requires_azure = pytest.mark.skipif(
     not HAS_AZURE, reason="azure-cognitiveservices-speech não instalado",
 )
 requires_openai = pytest.mark.skipif(
-    not HAS_OPENAI, reason="pacote openai não instalado",
+    not HAS_OPENAI,
+    reason="openai não importável neste ambiente — NÃO TESTADO, não reprovado",
 )
 
 

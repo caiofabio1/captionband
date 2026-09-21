@@ -18,6 +18,8 @@ from __future__ import annotations
 import config
 import connection_test
 
+from .conftest import requires_openai
+
 
 class TestIdsAposentadosNaoVoltam:
     def test_nenhum_id_morto_e_oferecido_na_ui(self):
@@ -52,6 +54,7 @@ class TestConfigAntigaEMigrada:
         assert cfg.openrouter_stt_model == "mistralai/voxtral-small-24b-2507"
 
 
+@requires_openai
 class TestOTesteDeConexaoProvaOQueImporta:
     def _fake_client(self, monkeypatch, ids):
         class _M:

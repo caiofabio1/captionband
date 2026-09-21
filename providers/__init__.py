@@ -110,6 +110,17 @@ def _provider_class(name: str):
     raise ProviderUnavailable(f"Provedor desconhecido: {name!r}")
 
 
+def _event_vocabulary() -> list[str]:
+    """Termos do arquivo de vocabulario, lidos a cada construcao do provider.
+
+    Import local de proposito: `config` importa este pacote em alguns
+    caminhos, e um import de topo fecharia o ciclo.
+    """
+    from config import vocabulary_path
+    from vocabulary import load_terms
+    return load_terms(vocabulary_path())
+
+
 def build_provider(
     app_config: AppConfig,
     on_event: OnTranslationCallback,
@@ -149,6 +160,12 @@ def _construct(
             samplerate=app_config.audio.samplerate,
             streaming_mode=app_config.azure_streaming_mode,
             streaming_language=app_config.azure_streaming_language,
+            # Lido do disco a cada construcao do provider, nao guardado na
+            # config: o operador edita o arquivo entre sessoes, e uma copia em
+            # memoria ficaria velha justamente quando ele acabou de corrigir
+            # um termo.
+            phrases=_event_vocabulary(),
+            phrase_weight=app_config.vocabulary_weight,
         )
     if name == "google":
         from .google import GoogleProvider

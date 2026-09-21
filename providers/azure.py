@@ -51,6 +51,8 @@ from .base import (
     classify_exception,
 )
 
+from vocabulary import clamp_weight
+
 log = logging.getLogger(__name__)
 
 # Backoff between reconnection attempts, in seconds. Mirrors the pattern the
@@ -81,6 +83,8 @@ class AzureProvider(TranslationProvider):
         samplerate: int = 16000,
         streaming_mode: bool = False,
         streaming_language: str = "pt-BR",
+        phrases: list[str] | None = None,
+        phrase_weight: float = 1.0,
     ):
         if not speech_key:
             raise ValueError("Azure speech_key required")
@@ -105,6 +109,8 @@ class AzureProvider(TranslationProvider):
         self.samplerate = samplerate
         self.streaming_mode = streaming_mode
         self.streaming_language = streaming_language
+        self.phrases = list(phrases or [])
+        self.phrase_weight = phrase_weight
 
         self._push_stream: speechsdk.audio.PushAudioInputStream | None = None
         self._recognizer: speechsdk.translation.TranslationRecognizer | None = None
@@ -221,7 +227,39 @@ class AzureProvider(TranslationProvider):
         recognizer.canceled.connect(self._on_canceled)
         recognizer.session_started.connect(lambda _: log.info("azure session started"))
         recognizer.session_stopped.connect(self._on_session_stopped)
+        self._attach_phrase_list(recognizer)
         return recognizer
+
+    def _attach_phrase_list(self, recognizer) -> None:
+        """Bias recognition towards the event's vocabulary.
+
+        Attached HERE and nowhere else, because _build_recognizer() is the one
+        path that both start() and the reconnect worker go through. A phrase
+        list applied only at start would silently vanish on the first
+        reconnection of a 2-hour event, which is exactly when nobody is
+        watching the log.
+
+        Failure is swallowed on purpose. An unusable vocabulary must cost the
+        operator unimproved captions, never the session: this runs while the
+        talk is starting, and the alternative to a caption with "cab sim" in
+        it is no caption at all.
+        """
+        if not self.phrases:
+            return
+        weight = clamp_weight(self.phrase_weight)
+        if weight <= 0.0:
+            log.info("vocabulário desligado (peso 0)")
+            return
+        try:
+            grammar = speechsdk.PhraseListGrammar.from_recognizer(recognizer)
+            for term in self.phrases:
+                grammar.addPhrase(term)
+            grammar.setWeight(weight)
+        except Exception:
+            log.exception("vocabulário não pôde ser aplicado; seguindo sem ele")
+            return
+        log.info("vocabulário aplicado: %d termos, peso %.1f (ex.: %s)",
+                 len(self.phrases), weight, ", ".join(self.phrases[:5]))
 
     # ------------------------------------------------------------ event handlers
 

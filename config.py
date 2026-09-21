@@ -57,6 +57,16 @@ def log_path() -> Path:
     return app_data_dir() / "app.log"
 
 
+def vocabulary_path() -> Path:
+    """Plain-text list of terms to bias recognition towards.
+
+    Lives beside config.json, next to the logs the operator already opens.
+    Not a config field: a path field would let the file go missing in a way
+    nobody could see, and there is no reason for it to be anywhere else.
+    """
+    return app_data_dir() / "vocabulary.txt"
+
+
 @dataclass
 class AudioConfig:
     device_name: str | None = None
@@ -152,6 +162,10 @@ class AppConfig:
     # Ordered list of providers to try if the primary fails repeatedly.
     # Empty = no fallback. The first valid provider in the list is used as fallback.
     fallback_providers: list[str] = field(default_factory=list)
+    # Peso do vocabulário do evento, 0.0 a 2.0 (0 desliga). A Azure documenta
+    # 1.0 como padrão e 2.0 como máximo, e diz que o peso vale para a LISTA
+    # inteira, não por termo.
+    vocabulary_weight: float = 1.0
 
     source_languages: list[str] = field(default_factory=lambda: ["pt-BR", "es-ES", "en-US"])
     target_languages: list[str] = field(default_factory=lambda: ["es"])

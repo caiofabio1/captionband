@@ -25,10 +25,21 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# Module-level import so tests can patch it, and so a broken install degrades
+# to "provider unavailable" instead of taking the module down.
+#
+# `except ImportError` is NOT enough, and this is not hypothetical: on
+# 2026-09-21 something upgraded pydantic-core to 2.49.0 in the user's global
+# site-packages while pydantic 2.13.5 still required 2.46.5, and `import
+# openai` started raising SystemError. ImportError does not catch that, so
+# importing this module died outright -- which is worse than the missing
+# dependency the guard was written for. providers/__init__.py already caught
+# BaseException at the factory for exactly this reason; the per-module guard
+# had stayed narrow.
 try:
     from openai import OpenAI
-except ImportError:
-    OpenAI = None  # type: ignore[assignment,misc]
+except Exception:      # SystemError from a dependency clash included
+    OpenAI = None      # type: ignore[assignment,misc]
 
 from ._audio_buffer import ChunkedAudioBuffer, pcm16_to_wav_bytes
 from .base import (
