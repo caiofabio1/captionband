@@ -817,6 +817,16 @@ class SettingsWindow(QDialog):
         vocab_btn = QPushButton("Abrir vocabulário para editar")
         vocab_btn.clicked.connect(self._open_vocabulary_file)
         vg.addRow(vocab_btn)
+
+        pack_btn = QPushButton("Adicionar vocabulário de saúde")
+        pack_btn.setToolTip(
+            "Acrescenta termos de saúde pública, organismos internacionais e "
+            "medicina tradicional — siglas e nomes de práticas que o "
+            "reconhecimento costuma errar.\n"
+            "Só entra o que ainda não está no arquivo; clicar duas vezes não "
+            "duplica nada. Nada é sobrescrito.")
+        pack_btn.clicked.connect(self._add_health_vocabulary)
+        vg.addRow(pack_btn)
         outer.addWidget(vocab_group)
 
         outer.addStretch(1)
@@ -850,6 +860,26 @@ class SettingsWindow(QDialog):
         if len(termos) > MAX_PHRASES:
             aviso = f"  ⚠ acima do limite de {MAX_PHRASES} da Azure"
         self.vocabulary_count_label.setText(f"{len(termos)}{aviso}")
+
+    def _add_health_vocabulary(self) -> None:
+        from config import vocabulary_path
+        from vocabularies import pacote_saude
+        from vocabulary import append_terms, load_terms
+
+        path = vocabulary_path()
+        quantos = append_terms(path, pacote_saude())
+        self._refresh_vocabulary_count()
+        total = len(load_terms(path))
+        if quantos:
+            QMessageBox.information(
+                self, "Vocabulário",
+                f"{quantos} termos acrescentados. O arquivo tem {total} agora.\n\n"
+                f"Revise e apague o que não aparece nas suas falas: lista longa "
+                f"piora a qualidade e a latência.\n\n{path}")
+        else:
+            QMessageBox.information(
+                self, "Vocabulário",
+                f"Esses termos já estavam todos no arquivo ({total} no total).")
 
     def _open_vocabulary_file(self) -> None:
         import os

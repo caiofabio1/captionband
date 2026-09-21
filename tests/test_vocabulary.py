@@ -205,3 +205,109 @@ class TestATelaOferecOVocabulario:
             assert w.vocabulary_weight_spin.specialValueText() == "desligado"
         finally:
             w.close()
+
+
+class TestPacotesProntos:
+    """Os vocabulários que vêm no app.
+
+    Não testam se os termos estão "certos" — um termo que a Azure já acerta
+    não faz mal, só ocupa espaço. Testam o que pode dar errado de verdade:
+    lista que estoura o teto, frase longa que a doc diz que atrapalha,
+    duplicata entre pacotes, e informação que não devia estar num repo público.
+    """
+
+    def test_o_pacote_cabe_folgado_no_teto_da_azure(self):
+        from vocabularies import pacote_saude
+        termos = parse(pacote_saude())
+        assert 0 < len(termos) <= MAX_PHRASES / 2, (
+            f"{len(termos)} termos — perto do teto de {MAX_PHRASES} não sobra "
+            f"espaço para os termos do próprio evento")
+
+    def test_os_tres_blocos_somam_o_pacote(self):
+        """Número derivado: recalculado, não afirmado."""
+        from vocabularies import PACOTES, pacote_saude
+        soma = sum(len(parse(b)) for b in PACOTES.values())
+        # Pode haver termo repetido ENTRE blocos; o pacote deduplica.
+        assert len(parse(pacote_saude())) <= soma
+
+    def test_nenhum_termo_repetido_entre_os_blocos(self):
+        from vocabularies import PACOTES
+        visto: dict[str, str] = {}
+        repetidos = []
+        for nome, bloco in PACOTES.items():
+            for termo in parse(bloco):
+                chave = termo.casefold()
+                if chave in visto:
+                    repetidos.append(f"{termo!r} em {visto[chave]} e {nome}")
+                visto[chave] = nome
+        assert not repetidos, repetidos
+
+    def test_sem_frase_longa(self):
+        """A doc da Azure: "a longer phrase list will impact quality and
+        latency", e frases longas gastam a lista sem serem ditas."""
+        from vocabularies import pacote_saude
+        longos = [t for t in parse(pacote_saude()) if len(t.split()) > 4]
+        assert not longos, f"frases longas demais: {longos}"
+
+    def test_nada_de_informacao_interna_num_repo_publico(self):
+        """Nomes de pessoa, sistema interno e sigla de projeto ficam no
+        arquivo local do operador, que vive em %LOCALAPPDATA%."""
+        from vocabularies import PACOTES
+        fonte = "".join(PACOTES.values()).lower()
+        for proibido in ("f.radar", "fradar", "consira", "@", "senha", "token"):
+            assert proibido not in fonte, f"{proibido!r} não pode ir para o repo"
+
+    def test_todo_termo_sobrevive_a_sanitizacao(self):
+        """Termo que o sanitize mudaria é termo que eu digitei errado."""
+        from vocabularies import pacote_saude
+        for termo in parse(pacote_saude()):
+            assert sanitize(termo) == termo, f"{termo!r} -> {sanitize(termo)!r}"
+
+
+class TestAcrescentarSemDuplicar:
+    def test_o_segundo_clique_nao_duplica(self, tmp_path):
+        from vocabulary import append_terms
+        from vocabularies import pacote_saude
+
+        f = tmp_path / "vocabulary.txt"
+        primeiro = append_terms(f, pacote_saude())
+        assert primeiro > 0
+        depois_do_primeiro = len(load_terms(f))
+        assert append_terms(f, pacote_saude()) == 0
+        assert len(load_terms(f)) == depois_do_primeiro
+
+    def test_os_termos_do_operador_sobrevivem(self, tmp_path):
+        from vocabulary import append_terms
+        from vocabularies import pacote_saude
+
+        f = tmp_path / "vocabulary.txt"
+        f.write_text("TERMO DO EVENTO\nSUS\n", encoding="utf-8")
+        append_terms(f, pacote_saude())
+        termos = load_terms(f)
+        assert "TERMO DO EVENTO" in termos
+        assert sum(1 for t in termos if t.casefold() == "sus") == 1, \
+            "SUS ja existia e foi duplicado"
+
+    def test_arquivo_sem_permissao_devolve_zero_em_vez_de_explodir(
+            self, tmp_path, monkeypatch):
+        from vocabulary import append_terms
+
+        f = tmp_path / "vocabulary.txt"
+        f.write_text("X\n", encoding="utf-8")
+
+        def nega(*a, **k):
+            raise OSError("sem permissao")
+
+        monkeypatch.setattr(type(f), "open", nega)
+        assert append_terms(f, "NOVO\n") == 0
+
+    def test_cabecalho_de_secao_vai_junto(self, tmp_path):
+        """O operador precisa ver por que um termo esta la para decidir apagar."""
+        from vocabulary import append_terms
+        from vocabularies import pacote_saude
+
+        f = tmp_path / "vocabulary.txt"
+        append_terms(f, pacote_saude())
+        texto = f.read_text(encoding="utf-8")
+        assert "organismos internacionais" in texto.lower() or \
+               "Organismos" in texto or "# ---" in texto

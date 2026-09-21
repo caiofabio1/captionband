@@ -92,8 +92,8 @@ def ler_wav(caminho: Path) -> tuple[bytes, int]:
 
 
 def uma_passada(cfg, audio: bytes, samplerate: int, termos: list[str],
-                peso: float) -> tuple[str, float]:
-    """Roda o áudio inteiro pelo provedor REAL e devolve (texto, segundos).
+                peso: float) -> tuple[str, float, "Counter[str]"]:
+    """Roda o áudio pelo provedor REAL: (texto, segundos, idiomas detectados).
 
     Usa o AzureProvider do app, não uma chamada solta ao SDK: a pergunta é se
     o vocabulário funciona NO CAMINHO QUE VAI AO PALCO, com at-start LID, os
@@ -103,11 +103,19 @@ def uma_passada(cfg, audio: bytes, samplerate: int, termos: list[str],
     from providers.azure import AzureProvider
 
     partes: list[str] = []
+    idiomas: Counter[str] = Counter()
     pronto = threading.Event()
 
     def on_event(ev) -> None:
         if getattr(ev, "is_final", False) and getattr(ev, "original", ""):
             partes.append(ev.original)
+            # O idioma que o LID escolheu, por fala. É a metade que faltava:
+            # dois painelistas de famílias diferentes apontaram, sem se
+            # falarem, que uma lista pesada em português pode enviesar a
+            # ESCOLHA DE IDIOMA num evento em inglês — e isso não está
+            # documentado em lado nenhum. Contar acerto por termo sem olhar o
+            # idioma mediria metade do risco.
+            idiomas[getattr(ev, "detected_language", "") or "?"] += 1
 
     prov = AzureProvider(
         speech_key=cfg.azure_speech_key,
@@ -134,7 +142,7 @@ def uma_passada(cfg, audio: bytes, samplerate: int, termos: list[str],
         pronto.wait(timeout=8.0)   # rabo de reconhecimento depois do áudio
     finally:
         prov.stop()
-    return " ".join(partes), time.monotonic() - inicio
+    return " ".join(partes), time.monotonic() - inicio, idiomas
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -192,17 +200,23 @@ def main(argv: list[str] | None = None) -> int:
 
     sem: Counter[str] = Counter()
     com: Counter[str] = Counter()
+    lid_sem: Counter[str] = Counter()
+    lid_com: Counter[str] = Counter()
     textos: list[tuple[str, str]] = []
     for r in range(args.repeticoes):
-        for rotulo, p, acumulador in (("SEM vocabulário", 0.0, sem),
-                                      ("COM vocabulário", peso, com)):
+        for rotulo, p, acumulador, lid in (
+                ("SEM vocabulário", 0.0, sem, lid_sem),
+                ("COM vocabulário", peso, com, lid_com)):
             print(f"  [{r + 1}/{args.repeticoes}] {rotulo}...", flush=True)
-            texto, gasto = uma_passada(cfg, audio, samplerate, termos, p)
+            texto, gasto, detectados = uma_passada(
+                cfg, audio, samplerate, termos, p)
             textos.append((f"{rotulo} #{r + 1}", texto))
             norm = normalizar(texto)
             for termo in termos:
                 acumulador[termo] += conta_ocorrencias(norm, termo)
-            print(f"        {len(texto)} chars em {gasto:.0f}s")
+            lid.update(detectados)
+            print(f"        {len(texto)} chars em {gasto:.0f}s  "
+                  f"idiomas: {dict(detectados)}")
 
     print("\n" + "=" * 62)
     print(f"{'termo':<28}{'sem':>7}{'com':>7}{'':>4}")
@@ -220,6 +234,20 @@ def main(argv: list[str] | None = None) -> int:
     print("=" * 62)
     print(f"melhoraram {melhorou} · pioraram {piorou} · iguais {igual}")
     print(f"total de acertos: sem={sum(sem.values())}  com={sum(com.values())}")
+
+    print("\nIDIOMA ESCOLHIDO PELO LID (o risco que ninguém documentou)")
+    print(f"  sem vocabulário: {dict(lid_sem) or 'nenhuma fala final'}")
+    print(f"  com vocabulário: {dict(lid_com) or 'nenhuma fala final'}")
+    mudou = sorted(k for k in set(lid_sem) | set(lid_com)
+                   if lid_sem.get(k, 0) != lid_com.get(k, 0))
+    if mudou:
+        print(f"  ATENCAO: a distribuicao MUDOU em {mudou}")
+        print("    Se este áudio é de um idioma só e o vocabulário fez o LID")
+        print("    escolher outro, o vocabulário está enviesando a DETECÇÃO.")
+        print("    O remédio é baixar o peso ou separar a lista por idioma —")
+        print("    não acrescentar mais termos.")
+    else:
+        print("  não mudou — o vocabulário não mexeu na detecção de idioma")
 
     if melhorou == 0 and sum(com.values()) == sum(sem.values()):
         print("\nVEREDITO: o vocabulário NÃO mudou nada neste áudio.")

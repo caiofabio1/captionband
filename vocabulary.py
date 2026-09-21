@@ -145,6 +145,50 @@ def clamp_weight(value: float) -> float:
     return max(WEIGHT_MIN, min(WEIGHT_MAX, weight))
 
 
+def append_terms(path, texto: str) -> int:
+    """Acrescenta ao arquivo os termos de `texto` que ainda não estão lá.
+
+    Devolve quantos entraram. Idempotente: clicar no botão duas vezes não
+    duplica nada, porque a comparação é a mesma de `parse()` — sanitizada e
+    sem diferenciar caixa. Sem isso, o segundo clique encheria o arquivo de
+    repetição que o operador teria de limpar à mão.
+
+    Acrescenta, nunca reescreve: o arquivo pode já ter os termos do evento
+    dele, e um pacote pronto não tem o direito de sobrepor isso.
+    """
+    ensure_file(path)
+    try:
+        atual = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        log.exception("vocabulário ilegível em %s; nada acrescentado", path)
+        return 0
+
+    ja_tem = {t.casefold() for t in parse(atual)}
+    novas: list[str] = []
+    for raw in texto.splitlines():
+        linha = raw.strip()
+        if not linha or linha.startswith("#"):
+            novas.append(raw.rstrip())   # cabeçalhos de seção entram junto
+            continue
+        termo = sanitize(linha)
+        if not termo or termo.casefold() in ja_tem:
+            continue
+        ja_tem.add(termo.casefold())
+        novas.append(termo)
+
+    # Só termo, sem termo novo nenhum: não sujar o arquivo com cabeçalhos
+    # órfãos de um pacote que já estava inteiro lá.
+    if not any(l and not l.startswith("#") for l in novas):
+        return 0
+    try:
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write("\n" + "\n".join(novas) + "\n")
+    except OSError:
+        log.exception("não foi possível escrever em %s", path)
+        return 0
+    return sum(1 for l in novas if l and not l.startswith("#"))
+
+
 def ensure_file(path) -> bool:
     """Create the file with its instructions if it is not there yet.
 
