@@ -288,8 +288,8 @@ class TestPacotesProntos:
 
 class TestAcrescentarSemDuplicar:
     def test_o_segundo_clique_nao_duplica(self, tmp_path):
-        from vocabulary import append_terms
         from vocabularies import pacote_saude
+        from vocabulary import append_terms
 
         f = tmp_path / "vocabulary.txt"
         primeiro = append_terms(f, pacote_saude())
@@ -299,8 +299,8 @@ class TestAcrescentarSemDuplicar:
         assert len(load_terms(f)) == depois_do_primeiro
 
     def test_os_termos_do_operador_sobrevivem(self, tmp_path):
-        from vocabulary import append_terms
         from vocabularies import pacote_saude
+        from vocabulary import append_terms
 
         f = tmp_path / "vocabulary.txt"
         f.write_text("TERMO DO EVENTO\nSUS\n", encoding="utf-8")
@@ -325,8 +325,8 @@ class TestAcrescentarSemDuplicar:
 
     def test_cabecalho_de_secao_vai_junto(self, tmp_path):
         """O operador precisa ver por que um termo esta la para decidir apagar."""
-        from vocabulary import append_terms
         from vocabularies import pacote_saude
+        from vocabulary import append_terms
 
         f = tmp_path / "vocabulary.txt"
         append_terms(f, pacote_saude())

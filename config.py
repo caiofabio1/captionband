@@ -72,6 +72,18 @@ class AudioConfig:
     device_name: str | None = None
     samplerate: int = 16000
     channels: int = 1
+    # Capturar TAMBEM o microfone e somar ao audio do sistema. Numa
+    # conferencia o loopback traz quem fala do outro lado; o microfone traz
+    # quem fala na sala. Desligado por padrao: com o audio saindo em
+    # alto-falante o microfone devolve o que o loopback ja capturou e a fala
+    # chega duplicada ao reconhecedor.
+    capture_microphone: bool = False
+    # None = o microfone padrao do Windows.
+    microphone_name: str | None = None
+    # Microfone de sala costuma chegar mais baixo que o audio da chamada, que
+    # ja vem normalizado. Botao de calibragem, nao enfeite: sem ele a unica
+    # saida e mexer no volume do Windows no meio do evento.
+    microphone_gain: float = 1.0
 
 
 @dataclass
@@ -396,7 +408,7 @@ _DEAD_OPENROUTER_TRANSLATION = {
 }
 
 
-def _retire_dead_openrouter_models(cfg: "AppConfig") -> None:
+def _retire_dead_openrouter_models(cfg: AppConfig) -> None:
     if cfg.openrouter_stt_model in _DEAD_OPENROUTER_STT:
         log.warning("openrouter_stt_model %r nao existe mais; usando %r",
                     cfg.openrouter_stt_model, AppConfig.openrouter_stt_model)

@@ -49,8 +49,8 @@ from providers.base import (
     STATUS_FAILING,
     STATUS_FATAL,
 )
-from providers.google import GoogleProvider
 from providers.chunked_rest import ChunkedRestProvider
+from providers.google import GoogleProvider
 from providers.openai_realtime import (
     OpenAIRealtimeProvider,
     _resample_to_24k,

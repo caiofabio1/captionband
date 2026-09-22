@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — microfone da sala somado ao áudio do sistema
+
+Numa conferência o loopback traz quem fala do OUTRO lado; nenhuma ferramenta
+devolve a sua própria voz para os seus alto-falantes. Quem falava NA SALA
+simplesmente não era legendado.
+
+- **Configurações → Áudio → "Capturar também o microfone"**, com escolha de
+  dispositivo e ganho (microfone de sala chega mais baixo que o áudio da
+  chamada, que já vem normalizado). Desligado por padrão.
+- **Um reconhecedor, não dois:** as duas fontes são somadas antes de ir ao
+  provedor. Um segundo reconhecedor dobraria o custo por minuto, dobraria a
+  identificação de idioma e exigiria costurar duas legendas numa banda só.
+- **Deriva de relógio tratada, porque foi medida:** nesta máquina o loopback
+  entrega 16041 Hz e o microfone 16002 Hz — relógios físicos diferentes,
+  0,25%, ~9 s de descompasso por hora. O loopback dá o ritmo (ele entrega
+  blocos mesmo em silêncio), a fila do microfone tem teto de 300 ms e um
+  colchão de 100 ms absorve o engasgo do agendador.
+- **Microfone que cai não derruba a legenda:** vai para a saúde (bandeja
+  âmbar) em vez do caminho de reabertura de captura. Perder a voz da sala é
+  ruim; perder a legenda inteira por causa dela é pior.
+- **O que já existia continua sendo checado:** "Testar captura" e o
+  `preflight` abrem a captura SOMADA quando a opção está ligada e reprovam se
+  o microfone não subir — um teste que abrisse só o loopback aprovaria o áudio
+  do evento sem nunca tocar no dispositivo de onde vem metade da fala.
+- **Sem cancelamento de eco, e dito em voz alta:** com o som em alto-falante o
+  microfone devolve o que o loopback já capturou e a legenda duplica. A tela e
+  o README pedem fone de ouvido.
+
 ## [0.6.1] - 2026-09-16
 
 ### Fixed — revisão de código em 3 frentes (2026-09-16)

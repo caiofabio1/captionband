@@ -92,7 +92,7 @@ def ler_wav(caminho: Path) -> tuple[bytes, int]:
 
 
 def uma_passada(cfg, audio: bytes, samplerate: int, termos: list[str],
-                peso: float) -> tuple[str, float, "Counter[str]"]:
+                peso: float) -> tuple[str, float, Counter[str]]:
     """Roda o áudio pelo provedor REAL: (texto, segundos, idiomas detectados).
 
     Usa o AzureProvider do app, não uma chamada solta ao SDK: a pergunta é se

@@ -5,10 +5,11 @@
 Legenda ao vivo, traduzida, projetada sobre qualquer coisa que toque no seu
 Windows.
 
-O CaptionBand escuta a **saída de áudio do sistema** (WASAPI loopback) — não o
-microfone, e não uma aplicação específica. Serve para Teams, Zoom, Meet, um
-player de vídeo ou a mesa de som da sala, sem cabo virtual e sem configurar
-nada no aplicativo de origem. O texto aparece numa faixa transparente sempre
+O CaptionBand escuta a **saída de áudio do sistema** (WASAPI loopback) — não
+uma aplicação específica. Serve para Teams, Zoom, Meet, um player de vídeo ou a
+mesa de som da sala, sem cabo virtual e sem configurar nada no aplicativo de
+origem. Opcionalmente ele soma o **microfone** desta máquina, para que quem
+fala na sala também seja legendado (ver *Microfone da sala*, abaixo). O texto aparece numa faixa transparente sempre
 visível, pensada para ser **projetada para uma plateia**: uma ou duas caixas
 arrastáveis, altura fixa para a legenda não pular, e escolha de monitor para a
 legenda ir ao projetor e não ao notebook do operador.
@@ -44,6 +45,7 @@ Windows é só áudio saindo pela placa.
 - **Overlay PyQt6** transparente, always-on-top, click-through opcional, drag-to-reposition
 - **Banda de altura fixa**: a legenda não pula na projeção conforme o texto cresce
 - **Sem cabo virtual**: captura áudio do sistema via WASAPI loopback
+- **Microfone da sala (opcional)**: soma o microfone local ao áudio do sistema, num único reconhecimento
 - **GUI de configurações** com cores, posição, fontes, dispositivo de áudio
 - **System tray** para iniciar/parar/configurar sem deixar janela rodando
 
@@ -306,7 +308,7 @@ python translator.py --settings
 |---|---|
 | `translator.py` | Entry point — tray icon, orquestra capture+azure+overlay |
 | `config.py` | Dataclass `AppConfig` + load/save em `%LOCALAPPDATA%\CaptionBand\config.json` |
-| `audio_capture.py` | WASAPI loopback via sounddevice, listagem de devices |
+| `audio_capture.py` | WASAPI loopback via soundcard, microfone opcional somado, listagem de devices |
 | `azure_translator.py` | Wrapper do `TranslationRecognizer` com identificação de idioma |
 | `overlay_qt.py` | Janela transparente com texto outlined, drag, click-through |
 | `settings_window.py` | GUI com tabs (Azure / Idiomas / Áudio / Aparência / Sobre) |
@@ -323,6 +325,12 @@ python translator.py --settings
   que nenhum tenha sido falado**, então listar idiomas que não vão ocorrer piora o resultado. Nem
   at-start nem contínuo detectam troca **dentro** da mesma frase. Para fixar à mão: F9 ou o menu da bandeja.
 - **WASAPI loopback:** captura tudo que toca pelo dispositivo de saída — se você tocar música em outro app, ela também será traduzida. Use uma saída dedicada (ex.: fones USB usados só pelo Teams) ou pause outros áudios.
+- **Microfone da sala:** numa conferência o loopback traz quem fala do OUTRO lado — nenhuma
+  ferramenta devolve a sua própria voz para os seus alto-falantes. Ligue *Capturar também o
+  microfone* (Configurações → Áudio) para legendar quem fala aí. **Use fone de ouvido nesta
+  máquina**: com o som saindo em alto-falante o microfone captura de volta quem falou do outro
+  lado, a mesma frase chega duas vezes ao reconhecimento e a legenda duplica. O app não faz
+  cancelamento de eco. O botão *Testar captura* confirma, em 3 segundos, se o microfone abriu.
 - **Custo Azure:** webinar de 2h tier S0 ≈ US$5. Tier F0 (grátis) tem 5h/mês.
 - **Fim de fala:** o Azure precisa detectar pausa para fechar uma frase. Apresentadores que falam ininterruptamente atrasam mais.
 

@@ -921,6 +921,49 @@ class SettingsWindow(QDialog):
         device_w.setLayout(device_row)
         layout.addRow("Saída a capturar:", device_w)
 
+        # --- Microfone adicional ------------------------------------------
+        # Numa conferência, o loopback acima traz quem fala do OUTRO lado; o
+        # microfone traz quem fala NA SALA. Sem isto, a fala local só é
+        # legendada se voltar pelos alto-falantes, o que não acontece: nenhuma
+        # ferramenta de conferência devolve a sua própria voz para você.
+        self.mic_check = QCheckBox("Capturar também o microfone (voz de quem fala na sala)")
+        self.mic_check.toggled.connect(self._on_mic_toggled)
+        layout.addRow("", self.mic_check)
+
+        self.mic_combo = QComboBox()
+        self.mic_combo.setEditable(False)
+        self._populate_microphones()
+        mic_refresh = QPushButton("Atualizar lista")
+        mic_refresh.clicked.connect(self._populate_microphones)
+        mic_row = QHBoxLayout()
+        mic_row.addWidget(self.mic_combo, 1)
+        mic_row.addWidget(mic_refresh)
+        mic_w = QWidget()
+        mic_w.setLayout(mic_row)
+        self.mic_device_row = mic_w
+        layout.addRow("Microfone:", mic_w)
+
+        from PyQt6.QtWidgets import QDoubleSpinBox
+
+        self.mic_gain_spin = QDoubleSpinBox()
+        self.mic_gain_spin.setRange(0.0, 3.0)
+        self.mic_gain_spin.setSingleStep(0.1)
+        self.mic_gain_spin.setDecimals(1)
+        self.mic_gain_spin.setSuffix("×")
+        self.mic_gain_spin.setToolTip(
+            "Microfone de sala chega mais baixo que o áudio da chamada, que já "
+            "vem normalizado. 1,0 = sem ajuste; 0 = microfone desligado.")
+        layout.addRow("Ganho do microfone:", self.mic_gain_spin)
+
+        self.mic_hint = QLabel(
+            "<small><b>Use fone de ouvido nesta máquina.</b> Se o áudio da "
+            "conferência sair em alto-falante, o microfone captura de volta "
+            "quem falou do outro lado e a mesma frase chega duas vezes ao "
+            "reconhecimento — legenda duplicada e picada. O app não faz "
+            "cancelamento de eco; o do Teams age só no que ele envia.</small>")
+        self.mic_hint.setWordWrap(True)
+        layout.addRow("", self.mic_hint)
+
         # Audio level meter + test button
         from PyQt6.QtWidgets import QProgressBar
 
@@ -995,18 +1038,35 @@ class SettingsWindow(QDialog):
             # A signal emitted across threads is queued onto the GUI thread.
             self._capture_level.emit(min(100, int(rms * 200 * 100)))
 
-        self._test_capture = AudioCapture(
-            on_audio=on_audio,
-            device_index=device,
-            samplerate=cfg.audio.samplerate,
-            channels=cfg.audio.channels,
-        )
+        # Testar exatamente o que vai rodar. Com o microfone ligado, um teste
+        # que abrisse so o loopback diria "captura OK" sem nunca tocar no
+        # microfone - e o operador descobriria no evento que a voz da sala
+        # nao entra.
+        if cfg.audio.capture_microphone:
+            from audio_capture import MixedCapture
+
+            self._test_capture = MixedCapture(
+                on_audio=on_audio,
+                device_index=device,
+                mic_device=cfg.audio.microphone_name,
+                mic_gain=cfg.audio.microphone_gain,
+                samplerate=cfg.audio.samplerate,
+                channels=cfg.audio.channels,
+            )
+        else:
+            self._test_capture = AudioCapture(
+                on_audio=on_audio,
+                device_index=device,
+                samplerate=cfg.audio.samplerate,
+                channels=cfg.audio.channels,
+            )
         self._test_capture.start()
 
         def finish():
             cap, self._test_capture = getattr(self, "_test_capture", None), None
             if cap is None:
                 return                      # already stopped by _stop_test_capture
+            mic_vivo = cap.mic_is_alive() if hasattr(cap, "mic_is_alive") else None
             cap.stop()
             if getattr(self, "test_capture_btn", None) is not None:
                 self.test_capture_btn.setEnabled(True)
@@ -1029,6 +1089,9 @@ class SettingsWindow(QDialog):
                     f"Captura OK ✓\n\n"
                     f"Pico: {level}%\nChunks recebidos: {self._test_chunks}\n"
                     f"Dispositivo: {getattr(device, 'name', 'default')}"
+                    + ("" if mic_vivo is None else
+                       "\nMicrofone: somado ✓" if mic_vivo else
+                       "\nMicrofone: nao abriu — so o audio do sistema entrou")
                 )
             self.level_bar.setValue(0)
 
@@ -1355,6 +1418,26 @@ class SettingsWindow(QDialog):
         except Exception:
             log.exception("could not list audio devices")
 
+    def _populate_microphones(self) -> None:
+        self.mic_combo.clear()
+        self.mic_combo.addItem("(Padrão do sistema)", None)
+        try:
+            from audio_capture import list_input_devices
+
+            for dev in list_input_devices():
+                self.mic_combo.addItem(
+                    f"{dev['name']}  [{dev['channels']}ch]", dev["name"])
+        except Exception:
+            log.exception("could not list microphones")
+
+    def _on_mic_toggled(self, on: bool) -> None:
+        """Esconder o que não se aplica é melhor que deixar cinza e mudo."""
+        for w in (getattr(self, "mic_device_row", None),
+                  getattr(self, "mic_gain_spin", None),
+                  getattr(self, "mic_hint", None)):
+            if w is not None:
+                w.setEnabled(bool(on))
+
     def _load_from_config(self) -> None:
         idx = self.provider_combo.findData(self.config.provider)
         if idx >= 0:
@@ -1464,6 +1547,14 @@ class SettingsWindow(QDialog):
             if idx >= 0:
                 self.device_combo.setCurrentIndex(idx)
 
+        self.mic_check.setChecked(bool(self.config.audio.capture_microphone))
+        if self.config.audio.microphone_name:
+            idx = self.mic_combo.findData(self.config.audio.microphone_name)
+            if idx >= 0:
+                self.mic_combo.setCurrentIndex(idx)
+        self.mic_gain_spin.setValue(float(self.config.audio.microphone_gain))
+        self._on_mic_toggled(self.mic_check.isChecked())
+
     def _build_config(self) -> AppConfig:
         current_provider = self.provider_combo.currentData() or "azure"
         # Start from the CURRENT config, not a blank AppConfig: any field this
@@ -1506,6 +1597,9 @@ class SettingsWindow(QDialog):
             audio=replace(
                 self.config.audio,
                 device_name=self.device_combo.currentData(),
+                capture_microphone=self.mic_check.isChecked(),
+                microphone_name=self.mic_combo.currentData(),
+                microphone_gain=self.mic_gain_spin.value(),
             ),
             overlay=replace(
                 self.config.overlay,

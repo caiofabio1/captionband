@@ -65,7 +65,7 @@ from PyQt6.QtWidgets import (
     QSystemTrayIcon,
 )
 
-from audio_capture import AudioCapture, find_device
+from audio_capture import AudioCapture, MixedCapture, find_device
 from config import KNOWN_LANGUAGES, AppConfig, load_config, log_path, save_config
 from constants import APP_VERSION
 from ordering import ReorderGate
@@ -746,8 +746,14 @@ class TranslationController(QObject):
         self.state_changed.emit("running")
         log.info("translation pipeline running")
 
-    def _build_capture(self, device=None) -> AudioCapture:
-        return AudioCapture(
+    def _build_capture(self, device=None):
+        """A captura de áudio, com ou sem o microfone somado.
+
+        Devolve `AudioCapture` ou `MixedCapture` — a mesma interface, de
+        propósito: o watchdog de thread viva, o de áudio parado e a
+        reabertura de dispositivo continuam valendo sem saber qual é.
+        """
+        comum = dict(
             # Indirection, NOT self._translator.push_audio: binding the
             # provider's method here would freeze the capture to the provider
             # that existed at start(). Going through _push_audio lets the
@@ -760,6 +766,27 @@ class TranslationController(QObject):
             channels=self.config.audio.channels,
             on_died=self._on_capture_died,
         )
+        if not self.config.audio.capture_microphone:
+            return AudioCapture(**comum)
+        return MixedCapture(
+            mic_device=self.config.audio.microphone_name,
+            mic_gain=self.config.audio.microphone_gain,
+            on_mic_lost=self._on_microphone_lost,
+            **comum,
+        )
+
+    def _on_microphone_lost(self, reason: str) -> None:
+        """O microfone caiu no meio do evento — avisa, não interrompe.
+
+        Chamado da thread do microfone. Vai para a saúde (bandeja âmbar), e
+        NÃO para `_handle_capture_loss`: aquele caminho reabre e, insistindo,
+        derruba a legenda. Perder a voz da sala é ruim; perder a legenda
+        inteira por causa dela é pior.
+        """
+        self._set_health(
+            STATUS_DEGRADED, "",
+            "O microfone parou. A captura do sistema continua; "
+            "quem fala na sala não está mais entrando.")
 
     def _bind_provider_callbacks(self):
         """Callbacks that only act while THEIR provider is the current one.

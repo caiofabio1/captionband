@@ -178,7 +178,7 @@ def append_terms(path, texto: str) -> int:
 
     # Só termo, sem termo novo nenhum: não sujar o arquivo com cabeçalhos
     # órfãos de um pacote que já estava inteiro lá.
-    if not any(l and not l.startswith("#") for l in novas):
+    if not any(x and not x.startswith("#") for x in novas):
         return 0
     try:
         with path.open("a", encoding="utf-8") as fh:
@@ -186,7 +186,7 @@ def append_terms(path, texto: str) -> int:
     except OSError:
         log.exception("não foi possível escrever em %s", path)
         return 0
-    return sum(1 for l in novas if l and not l.startswith("#"))
+    return sum(1 for x in novas if x and not x.startswith("#"))
 
 
 def ensure_file(path) -> bool:

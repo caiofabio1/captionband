@@ -132,9 +132,10 @@ def check_audio(cfg, on_progress: Callable[[str], None] | None = None) -> Step:
     """
     import numpy as np
 
-    from audio_capture import AudioCapture, find_device
+    from audio_capture import AudioCapture, MixedCapture, find_device
 
     device = find_device(cfg.audio.device_name)
+    com_microfone = bool(cfg.audio.capture_microphone)
     peak = {"rms": 0.0, "blocks": 0}
 
     def on_audio(pcm: bytes) -> None:
@@ -144,13 +145,21 @@ def check_audio(cfg, on_progress: Callable[[str], None] | None = None) -> Step:
             peak["blocks"] += 1
 
     died: list[str] = []
-    cap = AudioCapture(
+    mic_perdido: list[str] = []
+    comum = dict(
         on_audio=on_audio,
         device_index=device,
         samplerate=cfg.audio.samplerate,
         channels=cfg.audio.channels,
         on_died=died.append,
     )
+    # Com o microfone ligado, abrir só o loopback aqui aprovaria o áudio do
+    # evento sem nunca tocar no dispositivo de onde vem metade da fala. Esta
+    # checagem existe justamente para pegar o que parece funcionar.
+    cap = (MixedCapture(mic_device=cfg.audio.microphone_name,
+                        mic_gain=cfg.audio.microphone_gain,
+                        on_mic_lost=mic_perdido.append, **comum)
+           if com_microfone else AudioCapture(**comum))
     try:
         cap.start()
     except Exception as exc:
@@ -182,8 +191,15 @@ def check_audio(cfg, on_progress: Callable[[str], None] | None = None) -> Step:
         return Step("Áudio", False,
                     f"Captura funcionando em '{name}', mas só silêncio digital. "
                     "Toque um som e repita a checagem.")
+    if com_microfone and (mic_perdido or not cap.mic_is_alive()):
+        motivo = mic_perdido[0] if mic_perdido else "a thread do microfone não ficou de pé"
+        return Step("Áudio", False,
+                    f"O áudio do sistema entra em '{name}', mas o MICROFONE "
+                    f"não: {motivo}. Quem falar na sala não será legendado.")
+    extra = " Microfone somado." if com_microfone else ""
     return Step("Áudio", True,
-                "Som detectado em '{}' (nível {:.3f}).".format(name, peak["rms"]))
+                "Som detectado em '{}' (nível {:.3f}).{}".format(
+                    name, peak["rms"], extra))
 
 
 # ---------------------------------------------------------------- runner

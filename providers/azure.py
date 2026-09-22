@@ -38,6 +38,7 @@ from constants import (
     AZURE_SEGMENTATION_SILENCE_MS,
     AZURE_STABLE_PARTIAL_THRESHOLD,
 )
+from vocabulary import clamp_weight
 
 from .base import (
     CODE_NETWORK,
@@ -50,8 +51,6 @@ from .base import (
     TranslationProvider,
     classify_exception,
 )
-
-from vocabulary import clamp_weight
 
 log = logging.getLogger(__name__)
 
