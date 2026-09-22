@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-22
+
+> Nota honesta sobre este arquivo: as versões 0.7.0 e 0.8.0 foram construídas
+> localmente e **nunca anotadas aqui nem publicadas** (a última tag é v0.6.1).
+> Esta seção cobre o que mudou desde a v0.6.1 e está no instalador; não é uma
+> reconstrução retroativa daquelas duas.
+
+### Added — vocabulário do evento (phrase list da Azure)
+
+- Lista de termos que o reconhecimento costuma errar — nomes próprios, siglas,
+  termos da área — enviada à Azure como *phrase list*. **Corrige o que é
+  OUVIDO**, não como o termo é traduzido, que é a metade que mais importa:
+  palavra mal ouvida gera tradução ruim de qualquer jeito.
+- Arquivo de texto em `%LOCALAPPDATA%`, um termo por linha, editável no
+  Bloco de Notas entre sessões. Botão em Configurações → Idiomas.
+- **Pacote de saúde** com 258 termos, montado a partir da taxonomia real dos
+  Mapas de Evidência CABSIN/BIREME. Acrescenta só o que falta: clicar duas
+  vezes não duplica, e os termos do operador nunca são sobrescritos.
+- `medir_vocabulario.py`: roda o mesmo WAV com e sem o vocabulário pelo
+  provedor REAL e conta acertos por termo. Existe porque a documentação da
+  Azure **não diz** se a phrase list funciona junto com identificação
+  automática de idioma — nenhuma das duas páginas menciona a outra. O script
+  também reporta o idioma escolhido por fala, que é o risco não documentado.
+
 ### Added — microfone da sala somado ao áudio do sistema
 
 Numa conferência o loopback traz quem fala do OUTRO lado; nenhuma ferramenta

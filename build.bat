@@ -39,7 +39,11 @@ if exist build rmdir /s /q build
 if exist dist rmdir /s /q dist
 
 echo [build] running pyinstaller...
-pyinstaller translator.spec --noconfirm
+REM `python -m PyInstaller`, nao o atalho `pyinstaller.exe`: o atalho
+REM guarda o caminho do python de quando foi instalado, entao um venv
+REM copiado de outra pasta faz o build rodar com o PyInstaller e as
+REM bibliotecas da pasta ANTIGA, em silencio. Medido em 2026-09-22.
+python -m PyInstaller translator.spec --noconfirm
 
 if errorlevel 1 (
   echo [build] FAILED
