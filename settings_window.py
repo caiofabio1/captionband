@@ -986,12 +986,16 @@ class SettingsWindow(QDialog):
         meter_w.setLayout(meter_row)
         layout.addRow("Medidor de áudio:", meter_w)
 
-        layout.addRow(QLabel(
+        # `_wrap_label`, não `QLabel`: sem wordWrap esta linha pedia 1017 px de
+        # largura (medido) numa aba de 752, e o QFormLayout atende o pedido —
+        # cortando fora da área visível o botão "Atualizar lista", o medidor,
+        # o botão "Testar captura" e o aviso sobre eco acima. Uma legenda de
+        # ajuda escondia os controles que ela explica.
+        layout.addRow(self._wrap_label(
             "<small>Escolha o dispositivo de <b>saída</b> onde o Teams toca o áudio. "
             "O app captura via <b>WASAPI loopback</b> — não precisa de cabo virtual. "
             "Use o botão <b>Testar captura</b> com áudio tocando para confirmar "
-            "que o dispositivo certo foi selecionado.</small>"
-        ))
+            "que o dispositivo certo foi selecionado.</small>"))
         return w
 
     def _on_test_capture(self) -> None:
@@ -1398,6 +1402,17 @@ class SettingsWindow(QDialog):
             "caiofabio1/captionband</a></small>"
         ))
         layout.addStretch(1)
+        # Esta aba imprime CAMINHOS, e caminho não tem teto de comprimento.
+        # Sem wordWrap o QLabel pede a largura de uma linha inteira e a aba
+        # estoura para a direita: medido com o diretório de dados da suíte,
+        # 868 px numa aba de 752. Um perfil de usuário com nome longo faz o
+        # mesmo na máquina do operador. Selecionável de quebra, porque quem
+        # abre esta aba quer copiar o caminho do log.
+        for lbl in w.findChildren(QLabel):
+            lbl.setWordWrap(True)
+            lbl.setTextInteractionFlags(
+                lbl.textInteractionFlags()
+                | Qt.TextInteractionFlag.TextSelectableByMouse)
         return w
 
     # ------------------------------------------------------------------ logic

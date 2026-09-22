@@ -207,3 +207,43 @@ class TestConfigMortaSumiu:
         cfg = config.load_config()
         assert cfg.overlay.max_chars == 180
         assert cfg.overlay.position == "top"
+
+
+class TestNenhumaAbaEstoraNaHorizontal:
+    """Legenda de ajuda que esconde o controle que ela explica.
+
+    Medido em 2026-09-22 na aba Áudio: um `QLabel` de ajuda sem
+    `setWordWrap(True)` pedia **1017 px** numa aba de **752**, e o
+    QFormLayout atende o pedido. Ficaram fora da área visível os dois botões
+    "Atualizar lista", o medidor de nível, o botão "Testar captura" e o aviso
+    de eco do microfone. A aba abria com aparência normal — o que faltava
+    estava à direita da borda.
+
+    O teste é por ABA, não pelo rótulo culpado: o defeito é de classe, e o
+    próximo texto de ajuda longo vai nascer em outra aba.
+    """
+
+    def test_o_conteudo_de_cada_aba_cabe_na_largura_que_ele_recebe(self, qapp):
+        from settings_window import SettingsWindow
+
+        w = SettingsWindow(AppConfig())
+        w.show()
+        qapp.processEvents()
+        try:
+            estouros = []
+            for i in range(w.tabs.count()):
+                w.tabs.setCurrentIndex(i)
+                qapp.processEvents()
+                aba = w.tabs.currentWidget()
+                interno = aba.widget() if hasattr(aba, "widget") else aba
+                if interno is None:
+                    continue
+                pedido = interno.sizeHint().width()
+                if pedido > aba.width():
+                    estouros.append(
+                        f"{w.tabs.tabText(i)}: pede {pedido}px, tem {aba.width()}px")
+            assert not estouros, (
+                "aba com estouro horizontal — algum controle fica fora da área "
+                f"visível: {estouros}")
+        finally:
+            w.close()
