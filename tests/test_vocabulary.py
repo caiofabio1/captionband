@@ -223,12 +223,34 @@ class TestPacotesProntos:
             f"{len(termos)} termos — perto do teto de {MAX_PHRASES} não sobra "
             f"espaço para os termos do próprio evento")
 
-    def test_os_tres_blocos_somam_o_pacote(self):
-        """Número derivado: recalculado, não afirmado."""
+    def test_os_blocos_somam_o_pacote(self):
+        """Número derivado: recalculado, não afirmado.
+
+        Igualdade, não `<=`: o teste irmão garante que não há termo repetido
+        entre blocos, então a soma TEM de bater. Com `<=` este teste passava
+        mesmo se o pacote perdesse um bloco inteiro pelo caminho.
+        """
         from vocabularies import PACOTES, pacote_saude
         soma = sum(len(parse(b)) for b in PACOTES.values())
-        # Pode haver termo repetido ENTRE blocos; o pacote deduplica.
-        assert len(parse(pacote_saude())) <= soma
+        assert len(parse(pacote_saude())) == soma
+
+    def test_termo_excluido_de_proposito_nao_voltou(self):
+        """A lista de exclusões é a metade do critério que ninguém vê.
+
+        Acrescentar termo é visível no diff; o que se perde em silêncio é a
+        regra que mandou "dor" e "ansiedade" ficarem DE FORA — palavra comum
+        que o modelo já acerta e que, boostada, passa a aparecer onde ninguém
+        a disse. Sem este teste, `EXCLUIDOS_DE_PROPOSITO` é comentário, e o
+        próximo que abrir o arquivo com boa intenção devolve "dor" para a
+        lista.
+        """
+        from vocabularies import EXCLUIDOS_DE_PROPOSITO, pacote_saude
+        presentes = {t.casefold() for t in parse(pacote_saude())}
+        voltaram = sorted(e for e in EXCLUIDOS_DE_PROPOSITO
+                          if e.casefold() in presentes)
+        assert not voltaram, (
+            f"{voltaram} estão em EXCLUIDOS_DE_PROPOSITO e voltaram para o "
+            f"pacote — ou o termo sai, ou a exclusão sai (com o motivo)")
 
     def test_nenhum_termo_repetido_entre_os_blocos(self):
         from vocabularies import PACOTES
