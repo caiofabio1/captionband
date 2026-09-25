@@ -438,7 +438,7 @@ class TestEsconderDuraAteOOperadorDesfazer:
         ov = CaptionOverlay(_cfg())
         try:
             self._falar(ov, qapp, "primeira")
-            ov._clear_all()                     # 15 s sem fala
+            ov._clear_all()                     # IDLE_CLEAR_MS sem fala
             assert ov.isVisible() is False
             assert ov.is_hidden_by_operator() is False
             self._falar(ov, qapp, "segunda")

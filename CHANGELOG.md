@@ -19,7 +19,7 @@ este projeto é MIT).
   `show()` a cada legenda nova, então o item da bandeja e o × da própria faixa
   eram desfeitos pela fala seguinte — o × até prometia que "Mostrar legenda"
   a traria de volta. Agora há um estado "escondida pelo operador", distinto
-  de sumir por 15 s sem fala, e só o operador o desfaz.
+  de sumir por 20 s sem fala, e só o operador o desfaz.
 - **Trocar um atalho em Configurações reiniciava a tradução.** A decisão de
   reiniciar comparava a config inteira menos a aparência; mudar o F9 com a
   legenda no ar cortava alguns segundos e partia a transcrição em dois

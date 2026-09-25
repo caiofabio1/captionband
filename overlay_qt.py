@@ -13,9 +13,9 @@ following live-captioning best practices:
   original transcript dim with "…" placeholder. When translation arrives, the
   same caption is updated in-place — no flashing.
 - **Time-windowed dedup**: identical originals within 4s are dropped.
-- **Min display time**: each new caption stays at least 1.5s before being
-  replaced (queues if events come faster).
-- **Idle clear**: caption fades out 15s after the last event.
+- **Min display time**: each new caption stays at least MIN_DISPLAY_MS
+  (800 ms) before being replaced (queues if events come faster).
+- **Idle clear**: the band hides IDLE_CLEAR_MS (20 s) after the last event.
 
 Display modes:
   * "translations_only" — translation only (with original dim above while pending)

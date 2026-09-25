@@ -1586,7 +1586,7 @@ class TrayApp(QObject):
         """Metade GUI do atalho de mostrar/esconder.
 
         Decide pelo que o OPERADOR pediu, não por isVisible(): a faixa some
-        sozinha depois de 15 s sem fala, e ler a visibilidade faria o atalho
+        sozinha depois de 20 s sem fala (IDLE_CLEAR_MS), e ler a visibilidade faria o atalho
         MOSTRAR a legenda numa pausa em que o operador queria escondê-la.
         """
         if self.overlay.is_hidden_by_operator():
