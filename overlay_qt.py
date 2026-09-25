@@ -136,6 +136,13 @@ class CaptionOverlay(QWidget):
         self._dragging = False
         self._drag_offset = QPoint()
         self._presentation = False
+        # O operador mandou esconder (bandeja, atalho ou o × da faixa). Fala
+        # nova NÃO reabre a faixa enquanto isto estiver ligado. Sem este
+        # estado, cada legenda chamava show() e "Esconder legenda" durava até
+        # a próxima frase — justamente quando alguém pede para tirar a
+        # legenda da tela durante um vídeo. Não confundir com a faixa sumir
+        # por ociosidade (`_clear_all`), que é da própria faixa e volta sozinha.
+        self._hidden_by_operator = False
         # How many composed lines belong to the NEWEST utterance. The fixed
         # band may drop older lines when it overflows, never these.
         self._current_block_lines = 0
@@ -533,7 +540,7 @@ class CaptionOverlay(QWidget):
             if changed:
                 self._adjust_height_for_text()
                 self._request_repaint()
-                self.show()
+                self._show_for_caption()
             self._idle_timer.start(self.IDLE_CLEAR_MS)
             return
 
@@ -551,7 +558,7 @@ class CaptionOverlay(QWidget):
             if changed:
                 self._adjust_height_for_text()
                 self._request_repaint()
-                self.show()
+                self._show_for_caption()
                 self._idle_timer.start(self.IDLE_CLEAR_MS)
             return
 
@@ -598,7 +605,7 @@ class CaptionOverlay(QWidget):
             self._record_seen(original)
             self._adjust_height_for_text()
             self._request_repaint()
-            self.show()
+            self._show_for_caption()
             self._idle_timer.start(self.IDLE_CLEAR_MS)
             return
 
@@ -620,7 +627,7 @@ class CaptionOverlay(QWidget):
         self._start_animation()
         self._adjust_height_for_text()
         self._request_repaint()
-        self.show()
+        self._show_for_caption()
         self._idle_timer.start(self.IDLE_CLEAR_MS)
 
     # Repaints are coalesced to this rate. Partials arrive 2–4×/s and the
@@ -651,6 +658,22 @@ class CaptionOverlay(QWidget):
         t = elapsed / self.ANIM_DURATION_MS
         # cubic-out easing: 1 - (1-t)^3
         return 1.0 - (1.0 - t) ** 3
+
+    def set_hidden_by_operator(self, hidden: bool) -> None:
+        """Esconder/mostrar por decisão do operador — dura até ele desfazer."""
+        self._hidden_by_operator = bool(hidden)
+        if self._hidden_by_operator:
+            self.hide()
+        else:
+            self.show()
+
+    def is_hidden_by_operator(self) -> bool:
+        return self._hidden_by_operator
+
+    def _show_for_caption(self) -> None:
+        """Legenda nova chegou: aparece, a menos que o operador tenha escondido."""
+        if not self._hidden_by_operator:
+            self.show()
 
     def _clear_all(self) -> None:
         """Idle: nobody has spoken for IDLE_CLEAR_MS. Take the band off the
@@ -1021,7 +1044,12 @@ class CaptionOverlay(QWidget):
     # ------------------------------------------------------------------ drag
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton and not self.overlay_config.click_through:
+        # `locked`: a faixa posicionada para o evento não sai do lugar com um
+        # esbarrão no mouse da máquina que projeta. O × tem o próprio botão e
+        # continua respondendo.
+        if (event.button() == Qt.MouseButton.LeftButton
+                and not self.overlay_config.click_through
+                and not self.overlay_config.locked):
             self._dragging = True
             self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
             event.accept()

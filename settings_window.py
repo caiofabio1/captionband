@@ -832,6 +832,20 @@ class SettingsWindow(QDialog):
         outer.addStretch(1)
         return w
 
+    def show_tab(self, label: str) -> bool:
+        """Traz para frente a aba com este rótulo. False se ela não existir.
+
+        É o destino do "Corrigir" da bandeja: um erro de chave abre direto em
+        Credenciais, em vez de largar o operador na primeira aba com a janela
+        inteira para vasculhar no meio do evento.
+        """
+        for i in range(self.tabs.count()):
+            if self.tabs.tabText(i) == label:
+                self.tabs.setCurrentIndex(i)
+                return True
+        log.warning("aba %r não existe; abrindo na atual", label)
+        return False
+
     @staticmethod
     def _wrap_label(html: str) -> QLabel:
         label = QLabel(html)
@@ -1313,6 +1327,26 @@ class SettingsWindow(QDialog):
         pl.addRow(preview)
 
         outer.addWidget(proj_group)
+
+        # Atalhos de palco. Moram aqui porque controlam a legenda durante o
+        # evento — a hora em que ninguém quer caçar o ícone da bandeja numa
+        # área de trabalho projetada.
+        keys_group = QGroupBox("Atalhos de teclado durante o evento")
+        kl = QFormLayout(keys_group)
+        self.hotkey_toggle_caption_input = QLineEdit()
+        self.hotkey_toggle_caption_input.setPlaceholderText("ex: f8 (vazio = desligado)")
+        self.hotkey_toggle_caption_input.setMaximumWidth(220)
+        kl.addRow("Mostrar/esconder legenda:", self.hotkey_toggle_caption_input)
+        self.hotkey_start_stop_input = QLineEdit()
+        self.hotkey_start_stop_input.setPlaceholderText("ex: ctrl+f8 (vazio = desligado)")
+        self.hotkey_start_stop_input.setMaximumWidth(220)
+        kl.addRow("Iniciar/parar tradução:", self.hotkey_start_stop_input)
+        kl.addRow(self._wrap_label(
+            "<small>Funcionam com qualquer janela em primeiro plano, com ou sem "
+            "tradução rodando. <b>Parar pede dois toques em 3 segundos</b>, para "
+            "um toque sem querer não derrubar a legenda. Evite Ctrl+Alt+letra: no "
+            "teclado ABNT2 é a mesma combinação do AltGr.</small>"))
+        outer.addWidget(keys_group)
         outer.addStretch(1)
 
         return w
@@ -1481,6 +1515,8 @@ class SettingsWindow(QDialog):
             it = self.azure_quick_langs_list.item(i)
             it.setSelected(it.data(Qt.ItemDataRole.UserRole) in quick)
         self.azure_switch_hotkey_input.setText(self.config.azure_switch_hotkey or "")
+        self.hotkey_toggle_caption_input.setText(self.config.hotkey_toggle_caption or "")
+        self.hotkey_start_stop_input.setText(self.config.hotkey_start_stop or "")
         self.vocabulary_weight_spin.setValue(float(self.config.vocabulary_weight))
         self._refresh_vocabulary_count()
 
@@ -1597,6 +1633,8 @@ class SettingsWindow(QDialog):
                 if self.azure_quick_langs_list.item(i).isSelected()
             ] or ["pt-BR", "en-US", "es-ES"],
             azure_switch_hotkey=self.azure_switch_hotkey_input.text().strip().lower(),
+            hotkey_toggle_caption=self.hotkey_toggle_caption_input.text().strip().lower(),
+            hotkey_start_stop=self.hotkey_start_stop_input.text().strip().lower(),
             openai_api_key=self.openai_api_key_input.text().strip(),
             google_credentials_json=self.google_creds_input_credentials.text().strip(),
             google_project_id=self.google_project_input_credentials.text().strip(),

@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-25
+
+Três ajustes de operação durante o evento, tirados do que o Sokuji e o
+TransKit fazem bem — reimplementados, não copiados (os dois são GPL/AGPL e
+este projeto é MIT).
+
+### Fixed
+
+- **"Esconder legenda" durava só até a próxima frase.** A faixa chamava
+  `show()` a cada legenda nova, então o item da bandeja e o × da própria faixa
+  eram desfeitos pela fala seguinte — o × até prometia que "Mostrar legenda"
+  a traria de volta. Agora há um estado "escondida pelo operador", distinto
+  de sumir por 15 s sem fala, e só o operador o desfaz.
+- **Trocar um atalho em Configurações reiniciava a tradução.** A decisão de
+  reiniciar comparava a config inteira menos a aparência; mudar o F9 com a
+  legenda no ar cortava alguns segundos e partia a transcrição em dois
+  arquivos. Atalho agora só re-registra a tecla.
+
+### Added
+
+- **Erro que diz o que fazer.** A bandeja recebia o texto cru da Azure, em
+  inglês e cortado em 160 caracteres ("WebSocket upgrade failed:
+  Authentication error (401)…"). Agora: "A Azure recusou a chave. Confira a
+  chave e a região em Configurações → Credenciais." O detalhe técnico segue
+  inteiro no log.
+- **Rota de um clique até o conserto.** Chave recusada, cota esgotada ou
+  áudio sumido fazem aparecer no menu da bandeja "🔧 Corrigir: abrir
+  Configurações → <aba>", e clicar no balão leva à mesma aba. O item do menu
+  existe porque o Windows pode esconder balões no "Não perturbe", que tem
+  regra automática para tela duplicada no projetor.
+- **Atalhos de palco:** F8 mostra/esconde a legenda, Ctrl+F8 inicia/para, com
+  ou sem tradução rodando (configuráveis em Configurações → Legenda). **Parar
+  pede dois toques em 3 s** — um toque sem querer não derruba a legenda.
+  Teclas de função e não Ctrl+Alt+letra, como o TransKit usa: no ABNT2, AltGr
+  chega como Ctrl+Alt, e Ctrl+Alt+Q dispararia a cada "/" digitado no chat.
+  Atalho repetido ou inválido vira aviso com rota para a aba, não silêncio.
+- **🔒 Travar posição da legenda** (bandeja): a faixa para de responder ao
+  arraste, o × continua funcionando. Sobrevive a salvar Configurações com a
+  janela aberta e a sair do Modo evento.
+
+### Verificado
+
+44 testes novos, e 13 mutações do código que eles dizem proteger — todas
+derrubam o teste certo. O atalho foi conferido com a biblioteca `keyboard`
+real nesta máquina, injetando F13 (tecla que não existe no teclado) com o
+scan code que um teclado mandaria: F13 disparou só o seu atalho e Ctrl+F13 só
+o seu. O `keyboard.send` da própria biblioteca não gera evento aqui — o app
+não o usa, mas um teste feito com ele teria concluído, errado, que os atalhos
+não funcionam.
+
 ## [0.9.0] - 2026-09-22
 
 > Nota honesta sobre este arquivo: as versões 0.7.0 e 0.8.0 foram construídas

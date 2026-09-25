@@ -41,7 +41,10 @@ from constants import (
 from vocabulary import clamp_weight
 
 from .base import (
+    CODE_AUTH,
     CODE_NETWORK,
+    CODE_UNKNOWN,
+    MESSAGES,
     STATUS_DEGRADED,
     STATUS_FAILING,
     STATUS_FATAL,
@@ -53,6 +56,31 @@ from .base import (
 )
 
 log = logging.getLogger(__name__)
+
+
+def canceled_message(code: str, details: str, reason) -> str:
+    """O que o OPERADOR lê quando a Azure encerra a sessão.
+
+    Antes ia para a bandeja o texto cru do SDK, cortado em 160 caracteres:
+    "Azure encerrou o reconhecimento: WebSocket upgrade failed:
+    Authentication error (401). Please check subscription information and
+    region name. SessionId: ...". Em inglês, técnico, e o pedaço que diz o que
+    fazer — conferir a REGIÃO — era justamente o que o corte costumava comer.
+
+    O detalhe técnico continua inteiro no log (`_on_canceled` registra antes
+    de chamar isto). Aqui vai a frase que alguém consegue seguir no meio de um
+    evento, dizendo onde corrigir.
+    """
+    if code == CODE_AUTH:
+        # A 401 da Azure é chave errada OU chave de outra região — o próprio
+        # texto dela manda conferir as duas coisas.
+        return ("A Azure recusou a chave. Confira a chave e a região em "
+                "Configurações → Credenciais.")
+    if code != CODE_UNKNOWN and code in MESSAGES:
+        return MESSAGES[code]
+    detalhe = (details or str(reason)).strip()[:80]
+    return ("A Azure encerrou o reconhecimento por um motivo não "
+            f"identificado ({detalhe}). Pare e inicie de novo.")
 
 # Backoff between reconnection attempts, in seconds. Mirrors the pattern the
 # Google provider already used; Azure had none.
@@ -359,11 +387,7 @@ class AzureProvider(TranslationProvider):
         # session: the recognizer will not resume on its own.
         if kind == STATUS_DEGRADED:
             kind = STATUS_FAILING
-        self.emit_status(
-            kind,
-            code,
-            f"Azure encerrou o reconhecimento: {details[:160] or str(evt.reason)}",
-        )
+        self.emit_status(kind, code, canceled_message(code, details, evt.reason))
 
     def _on_session_stopped(self, evt) -> None:
         """The session ended while we still want to be recognizing.

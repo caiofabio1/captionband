@@ -122,11 +122,11 @@ def classify_exception(exc: BaseException) -> tuple[str, str]:
 
 
 MESSAGES = {
-    CODE_AUTH: "Chave de API inválida ou sem permissão. Confira em Configurações.",
-    CODE_QUOTA: "Cota/créditos do provedor esgotados. Troque de provedor.",
+    CODE_AUTH: "Chave de API recusada. Confira em Configurações → Credenciais.",
+    CODE_QUOTA: "Cota/créditos do provedor esgotados. Configure uma reserva em Configurações → Provedor.",
     CODE_RATE_LIMIT: "Provedor limitando requisições (429). A legenda pode atrasar.",
     CODE_NETWORK: "Sem resposta do provedor. Verifique a internet do local.",
-    CODE_DEVICE: "Dispositivo de áudio indisponível. Reselecione em Configurações.",
+    CODE_DEVICE: "Dispositivo de áudio indisponível. Reselecione em Configurações → Áudio.",
     CODE_UNKNOWN: "Falha no provedor. Veja os logs para o detalhe.",
 }
 

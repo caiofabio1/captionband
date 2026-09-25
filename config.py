@@ -102,6 +102,10 @@ class OverlayConfig:
     # current one (0 = single line only, 1 = +1 prev, 2 = +2 prev, 3 = +3).
     max_history: int = 2
     click_through: bool = False
+    # Trava a posição: a faixa para de responder ao arraste. Quem manda nela é
+    # o menu da bandeja (ver TrayApp.toggle_lock); o × de esconder continua
+    # funcionando.
+    locked: bool = False
     max_chars: int = 220
     font_family: str = "Segoe UI"
     # Auto-concatenate consecutive utterances within this gap if same language.
@@ -151,6 +155,17 @@ class AppConfig:
     azure_quick_languages: list[str] = field(default_factory=lambda: ["pt-BR", "en-US", "es-ES"])
     # Global hotkey that cycles through azure_quick_languages. Empty = disabled.
     azure_switch_hotkey: str = "f9"
+    # Atalhos globais de palco (funcionam com qualquer janela em primeiro
+    # plano, com ou sem tradução rodando). Vazio = desligado.
+    #
+    # Teclas de função, e não Ctrl+Alt+letra como o TransKit usa: no teclado
+    # ABNT2, AltGr chega ao Windows como Ctrl+Alt, e AltGr+Q/W/E são "/", "?"
+    # e "°". Um atalho em Ctrl+Alt+Q esconderia a legenda toda vez que o
+    # operador digitasse uma barra no chat da reunião.
+    hotkey_toggle_caption: str = "f8"
+    # Parar pede um segundo toque em poucos segundos (ver TrayApp): um toque
+    # sem querer não pode derrubar a legenda no meio de uma fala.
+    hotkey_start_stop: str = "ctrl+f8"
 
 
 

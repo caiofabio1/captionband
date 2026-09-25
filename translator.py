@@ -80,7 +80,9 @@ from providers import (
     provider_capabilities,
 )
 from providers.base import (
+    CODE_AUTH,
     CODE_DEVICE,
+    CODE_QUOTA,
     STATUS_DEGRADED,
     STATUS_FAILING,
     STATUS_FATAL,
@@ -1223,6 +1225,49 @@ class TranslationController(QObject):
 # ---------------------------------------------------------------------- tray
 
 
+# Para onde a bandeja leva o operador quando o problema tem conserto numa aba
+# de Configurações. Rótulos literais de aba: há teste conferindo que cada um
+# existe, porque uma aba já foi renomeada nesta base ("Layout / Projeção" →
+# "Legenda") e um mapa desatualizado abriria a janela na aba errada, calado.
+FIX_TAB = {CODE_AUTH: "Credenciais", CODE_QUOTA: "Provedor", CODE_DEVICE: "Áudio"}
+HOTKEYS_TAB = "Legenda"
+
+
+def fix_tab_for(kind: str, code: str) -> str | None:
+    """A aba que resolve este problema, ou None se não há o que corrigir ali.
+
+    Só para FAILING/FATAL: um DEGRADED passa sozinho, e oferecer "Corrigir"
+    para ele mandaria o operador mexer no que não está quebrado.
+    """
+    if kind not in (STATUS_FAILING, STATUS_FATAL):
+        return None
+    return FIX_TAB.get(code)
+
+
+# Parar pelo atalho pede um segundo toque dentro desta janela. É o desenho da
+# saída em camadas do Sokuji ("ESC volta para a janela; só o segundo ESC
+# sai"): um toque sem querer no teclado da mesa de projeção não pode derrubar
+# a legenda no meio de uma fala. Iniciar não pede confirmação — começar a
+# legendar por engano não custa nada à plateia.
+STOP_CONFIRM_S = 3.0
+
+
+def stop_confirmed(armed_at: float, now: float) -> bool:
+    return armed_at > 0 and 0 <= now - armed_at <= STOP_CONFIRM_S
+
+
+def keep_tray_owned(saved: AppConfig, current: AppConfig) -> AppConfig:
+    """A trava de posição é da bandeja; um Salvar em Configurações não a desfaz.
+
+    A janela de Configurações guarda a config de quando foi ABERTA. Travar a
+    legenda pela bandeja com ela aberta e depois clicar em Salvar devolveria
+    a trava ao valor antigo, em silêncio. Um dono só por campo.
+    """
+    from dataclasses import replace
+    return replace(saved, overlay=replace(saved.overlay,
+                                          locked=current.overlay.locked))
+
+
 class TrayApp(QObject):
     # Minimum gap between two FAILING balloons (FATAL is never throttled).
     BALLOON_MIN_GAP_S = 30.0
@@ -1231,11 +1276,20 @@ class TrayApp(QObject):
     _update_available = pyqtSignal(str, str)  # (tag, url)
     # Emitted from the global-hotkey thread.
     _language_cycle_requested = pyqtSignal()
+    _caption_toggle_requested = pyqtSignal()
+    _start_stop_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__()
         self._update_available.connect(self._notify_update)
         self._language_cycle_requested.connect(self._apply_pending_language)
+        self._caption_toggle_requested.connect(self._toggle_caption_visibility)
+        self._start_stop_requested.connect(self._on_start_stop_hotkey)
+        # Antes de qualquer balão: _notify grava aqui de qual balão veio o clique.
+        self._balloon_fix_tab: str | None = None
+        self._fix_tab: str | None = None
+        self._stop_armed_at = 0.0
+        self._stage_hotkey_handles: list = []
         self._pending_language: str | None = None
         self._latest_release_url = ""
         self.app = QApplication(sys.argv)
@@ -1275,9 +1329,13 @@ class TrayApp(QObject):
         self.tray = QSystemTrayIcon(self._icons["stopped"])
         self._update_tooltip()
         self.tray.activated.connect(self._on_tray_activated)
+        self.tray.messageClicked.connect(self._on_balloon_clicked)
         self._build_menu()
         self._apply_overlays(self.config)
         self.tray.show()
+        # F8 / Ctrl+F8: ativos desde já, com ou sem tradução rodando — iniciar
+        # pelo teclado precisa funcionar justamente quando ainda está parado.
+        self._register_stage_hotkeys()
 
         # Global hotkey for cycling source language. We register lazily at
         # start_translation() so the hotkey is only active while a session is
@@ -1309,7 +1367,7 @@ class TrayApp(QObject):
         self._latest_release_url = url
         # The old text told the operator to use a tray menu item called
         # 'Sobre'. No such item exists — 'Sobre' is a TAB inside Settings.
-        self.tray.showMessage(
+        self._notify(
             f"Atualização disponível ({tag})",
             f"Versão atual: {APP_VERSION}. Abra Configurações → aba 'Sobre' para baixar.",
             QSystemTrayIcon.MessageIcon.Information,
@@ -1327,6 +1385,16 @@ class TrayApp(QObject):
         font.setBold(True)
         self.status_action.setFont(font)
         menu.addAction(self.status_action)
+
+        # Aparece só quando o problema tem conserto numa aba. O balão também
+        # leva lá, mas o Windows pode esconder balões no modo "Não perturbe",
+        # que tem regra automática para tela duplicada no projetor — o menu
+        # não depende disso.
+        self.action_fix = QAction("", menu)
+        self.action_fix.setVisible(False)
+        self.action_fix.triggered.connect(
+            lambda _c=False: self.open_settings(self._fix_tab))
+        menu.addAction(self.action_fix)
 
         self.provider_action = QAction(menu)
         self.provider_action.setEnabled(False)
@@ -1365,6 +1433,12 @@ class TrayApp(QObject):
         self.action_overlay_reset = QAction("Reposicionar legenda", menu)
         self.action_overlay_reset.triggered.connect(self._reposition_overlays)
         menu.addAction(self.action_overlay_reset)
+
+        self.action_lock = QAction("🔒  Travar posição da legenda", menu)
+        self.action_lock.setCheckable(True)
+        self.action_lock.setChecked(bool(self.config.overlay.locked))
+        self.action_lock.triggered.connect(self.toggle_lock)
+        menu.addAction(self.action_lock)
 
         self.action_split = QAction("🗂  Bilíngue em duas caixas (2º idioma no topo)", menu)
         self.action_split.setCheckable(True)
@@ -1500,13 +1574,27 @@ class TrayApp(QObject):
         return [o for o in (self.overlay, self.overlay2) if o is not None]
 
     def _show_overlays(self) -> None:
-        self.overlay.show()
+        self.overlay.set_hidden_by_operator(False)
         if self.overlay2 is not None and split_overlay_configs(self.config)[1] is not None:
-            self.overlay2.show()
+            self.overlay2.set_hidden_by_operator(False)
 
     def _hide_overlays(self) -> None:
         for o in self._overlays():
-            o.hide()
+            o.set_hidden_by_operator(True)
+
+    def _toggle_caption_visibility(self) -> None:
+        """Metade GUI do atalho de mostrar/esconder.
+
+        Decide pelo que o OPERADOR pediu, não por isVisible(): a faixa some
+        sozinha depois de 15 s sem fala, e ler a visibilidade faria o atalho
+        MOSTRAR a legenda numa pausa em que o operador queria escondê-la.
+        """
+        if self.overlay.is_hidden_by_operator():
+            self._show_overlays()
+            log.info("ui: atalho → mostrar legenda")
+        else:
+            self._hide_overlays()
+            log.info("ui: atalho → esconder legenda")
 
     def _reposition_overlays(self) -> None:
         for o in self._overlays():
@@ -1538,7 +1626,7 @@ class TrayApp(QObject):
         from dataclasses import replace
         if checked and len(self.config.target_languages) < 2:
             self.action_split.setChecked(False)
-            self.tray.showMessage(
+            self._notify(
                 "Duas caixas", "Precisa de 2 idiomas de saída (Configurações → Idiomas).",
                 QSystemTrayIcon.MessageIcon.Information, 3000)
             return
@@ -1553,12 +1641,27 @@ class TrayApp(QObject):
             log.exception("could not persist split_languages")
         if checked:
             self._show_overlays()
-            self.tray.showMessage(
+            self._notify(
                 "Duas caixas",
                 "{} no rodapé, {} no topo. Arraste cada caixa para onde quiser.".format(
                     self.config.target_languages[0].upper(),
                     " + ".join(t.upper() for t in self.config.target_languages[1:])),
                 QSystemTrayIcon.MessageIcon.Information, 4000)
+
+    def toggle_lock(self, checked: bool) -> None:
+        """Trava/destrava o arraste da faixa (e da segunda caixa, se houver)."""
+        from dataclasses import replace
+        overlay = replace(self.config.overlay, locked=bool(checked))
+        # O Modo evento guarda a config de antes dele; sem acompanhar aqui,
+        # desligar o Modo evento destravaria a legenda em silêncio.
+        if self._saved_overlay_config is not None:
+            self._saved_overlay_config = replace(
+                self._saved_overlay_config, locked=bool(checked))
+        self._apply_config(replace(self.config, overlay=overlay))
+        try:
+            save_config(self.config)
+        except Exception:
+            log.exception("could not persist locked")
 
     def set_caption_screen(self, screen_name: str) -> None:
         """Move the caption to another monitor and remember it."""
@@ -1585,7 +1688,7 @@ class TrayApp(QObject):
 
         ok = self.controller.set_source_mode(language)
         if not ok:
-            self.tray.showMessage(
+            self._notify(
                 "Idioma de origem",
                 "Aguarde — a troca anterior ainda está em andamento.",
                 QSystemTrayIcon.MessageIcon.Warning,
@@ -1609,7 +1712,7 @@ class TrayApp(QObject):
         self._apply_overlays(self.config)
         self._update_tooltip()
         if not ok:
-            self.tray.showMessage(
+            self._notify(
                 "Idioma de origem",
                 message or "Não foi possível trocar agora. Veja os logs.",
                 QSystemTrayIcon.MessageIcon.Warning, 5000,
@@ -1617,7 +1720,7 @@ class TrayApp(QObject):
             return
         if self.controller.is_running():
             self.status_action.setText("Status: ▶ rodando")
-        self.tray.showMessage(
+        self._notify(
             "Idioma de origem", self._pending_mode_label,
             QSystemTrayIcon.MessageIcon.Information, 1800,
         )
@@ -1678,6 +1781,82 @@ class TrayApp(QObject):
             log.exception("failed to register global hotkey %r", hotkey)
             self._hotkey_handle = None
 
+    def _register_stage_hotkeys(self) -> None:
+        """Mostrar/esconder legenda e iniciar/parar, pelo teclado.
+
+        Ficam ativos com a tradução parada também, ao contrário do F9 de
+        idioma: iniciar pelo teclado só serve se funcionar antes de iniciar.
+        Atalho repetido ou inválido não falha calado — vira aviso com a rota
+        para a aba onde ele se corrige, porque descobrir no meio do evento que
+        a tecla não faz nada é o pior momento possível.
+        """
+        self._unregister_stage_hotkeys()
+        pedidos = (
+            (self.config.hotkey_toggle_caption,
+             self._caption_toggle_requested.emit, "mostrar/esconder legenda"),
+            (self.config.hotkey_start_stop,
+             self._start_stop_requested.emit, "iniciar/parar"),
+        )
+        em_uso = {(self.config.azure_switch_hotkey or "").strip().lower()} - {""}
+        for tecla, acao, rotulo in pedidos:
+            tecla = (tecla or "").strip().lower()
+            if not tecla:
+                continue
+            if tecla in em_uso:
+                log.warning("atalho %r repetido; o de %s ficou desligado", tecla, rotulo)
+                self._notify(
+                    "Atalho repetido",
+                    f"'{tecla}' já é usado por outro atalho do CaptionBand; "
+                    f"o de {rotulo} ficou desligado.",
+                    QSystemTrayIcon.MessageIcon.Warning, 6000, fix_tab=HOTKEYS_TAB)
+                continue
+            em_uso.add(tecla)
+            try:
+                import keyboard  # type: ignore
+                self._stage_hotkey_handles.append(keyboard.add_hotkey(tecla, acao))
+                log.info("registered global hotkey: %s (%s)", tecla, rotulo)
+            except Exception:
+                log.exception("failed to register global hotkey %r", tecla)
+                self._notify(
+                    "Atalho inválido",
+                    f"'{tecla}' não é um atalho válido; o de {rotulo} ficou desligado.",
+                    QSystemTrayIcon.MessageIcon.Warning, 6000, fix_tab=HOTKEYS_TAB)
+
+    def _unregister_stage_hotkeys(self) -> None:
+        handles, self._stage_hotkey_handles = self._stage_hotkey_handles, []
+        if not handles:
+            return
+        try:
+            import keyboard  # type: ignore
+        except Exception:
+            return
+        for h in handles:
+            try:
+                keyboard.remove_hotkey(h)
+            except Exception:
+                log.exception("failed to remove global hotkey")
+
+    def _on_start_stop_hotkey(self) -> None:
+        """Metade GUI do atalho de iniciar/parar. Parar pede dois toques."""
+        import time as _t
+        now = _t.monotonic()
+        if not self.controller.is_running():
+            self._stop_armed_at = 0.0
+            log.info("ui: atalho → iniciar tradução")
+            self.start_translation()
+            return
+        if stop_confirmed(self._stop_armed_at, now):
+            self._stop_armed_at = 0.0
+            log.info("ui: atalho → parar tradução (confirmado)")
+            self.stop_translation()
+            return
+        self._stop_armed_at = now
+        tecla = (self.config.hotkey_start_stop or "").upper()
+        self._notify(
+            "Parar a tradução?",
+            f"Pressione {tecla} de novo em {int(STOP_CONFIRM_S)} s para parar.",
+            QSystemTrayIcon.MessageIcon.Information, int(STOP_CONFIRM_S * 1000))
+
     def _unregister_hotkey(self) -> None:
         if self._hotkey_handle is None:
             return
@@ -1714,7 +1893,7 @@ class TrayApp(QObject):
         # The F9 hotkey is Azure-only; after a fallback away from Azure it
         # would keep swallowing the key for nothing.
         self._register_hotkey()
-        self.tray.showMessage(
+        self._notify(
             "Provedor trocado",
             f"O provedor {old_label} falhou repetidamente. Trocou para {new_label}.",
             QSystemTrayIcon.MessageIcon.Warning,
@@ -1747,6 +1926,11 @@ class TrayApp(QObject):
         operator, who is watching this tray icon and not the projection.
         """
         self._health = (kind, code, message)
+        tab = fix_tab_for(kind, code)
+        self._fix_tab = tab
+        self.action_fix.setVisible(tab is not None)
+        if tab is not None:
+            self.action_fix.setText(f"🔧  Corrigir: abrir Configurações → {tab}")
         if kind == STATUS_OK:
             self.status_action.setText("Status: ▶ rodando")
             if self.controller.is_running():
@@ -1770,12 +1954,30 @@ class TrayApp(QObject):
             now = _t.monotonic()
             if kind == STATUS_FATAL or now - self._last_balloon_at >= self.BALLOON_MIN_GAP_S:
                 self._last_balloon_at = now
-                self.tray.showMessage(
+                self._notify(
                     "Tradução com problema",
-                    message,
+                    message + ("\n\nClique aqui para abrir onde corrigir." if tab else ""),
                     QSystemTrayIcon.MessageIcon.Warning,
                     9000,
+                    fix_tab=tab,
                 )
+
+    def _notify(self, title: str, message: str,
+                icon=QSystemTrayIcon.MessageIcon.Information, msecs: int = 10000,
+                fix_tab: str | None = None) -> None:
+        """Todo balão da bandeja passa por aqui.
+
+        O Qt só avisa "clicaram num balão", sem dizer qual. Guardar a rota de
+        correção do ÚLTIMO balão mostrado — e zerá-la a cada balão novo — é o
+        que impede o clique num aviso qualquer ("Legenda escondida") de abrir
+        Credenciais por causa de um erro de chave de minutos antes.
+        """
+        self._balloon_fix_tab = fix_tab
+        self.tray.showMessage(title, message, icon, msecs)
+
+    def _on_balloon_clicked(self) -> None:
+        if self._balloon_fix_tab:
+            self.open_settings(self._balloon_fix_tab)
 
     def _update_tooltip(self) -> None:
         provider = PROVIDER_LABELS.get(self.config.provider, self.config.provider)
@@ -1791,7 +1993,7 @@ class TrayApp(QObject):
         )
 
     def _show_welcome_notification(self) -> None:
-        self.tray.showMessage(
+        self._notify(
             "CaptionBand",
             "Clique no ícone (canto inferior direito da tela) para abrir o menu. "
             "Duplo-clique abre Configurações.",
@@ -1801,30 +2003,47 @@ class TrayApp(QObject):
 
     # ------------------------------------------------------------------ actions
 
-    def open_settings(self) -> None:
-        if self.settings_window is not None and self.settings_window.isVisible():
-            self.settings_window.raise_()
-            self.settings_window.activateWindow()
-            return
-        self.settings_window = SettingsWindow(self.config)
-        self.settings_window.config_saved.connect(self._on_config_saved)
-        self.settings_window.show()
+    def open_settings(self, tab: str | None = None) -> None:
+        # `QAction.triggered` entrega `checked` (bool) como primeiro argumento.
+        tab = tab if isinstance(tab, str) else None
+        if self.settings_window is None or not self.settings_window.isVisible():
+            self.settings_window = SettingsWindow(self.config)
+            self.settings_window.config_saved.connect(self._on_config_saved)
+            self.settings_window.show()
         self.settings_window.raise_()
         self.settings_window.activateWindow()
+        if tab:
+            self.settings_window.show_tab(tab)
 
     def _on_config_saved(self, cfg: AppConfig) -> None:
         from dataclasses import replace
+        cfg = keep_tray_owned(cfg, self.config)
         was_running = self.controller.is_running()
+        hotkeys_changed = (
+            (cfg.hotkey_toggle_caption, cfg.hotkey_start_stop, cfg.azure_switch_hotkey)
+            != (self.config.hotkey_toggle_caption, self.config.hotkey_start_stop,
+                self.config.azure_switch_hotkey))
         # Font, colours, position, display mode: the overlay applies these
         # live. Restarting the pipeline for them cut the captions for a few
         # seconds and split the transcript into two files mid-talk.
+        # Atalhos também não são do pipeline: trocar F8 no meio do evento
+        # re-registra a tecla, não derruba a legenda.
         appearance_only = replace(
             cfg, overlay=self.config.overlay, display_mode=self.config.display_mode,
+            hotkey_toggle_caption=self.config.hotkey_toggle_caption,
+            hotkey_start_stop=self.config.hotkey_start_stop,
+            azure_switch_hotkey=self.config.azure_switch_hotkey,
         ) == self.config
         restart = was_running and not appearance_only
         if restart:
             self.stop_translation()
         self._apply_config(cfg)
+        if hotkeys_changed:
+            self._register_stage_hotkeys()
+            # O F9 de idioma só é registrado ao iniciar; sem reiniciar o
+            # pipeline, a tecla nova precisa entrar aqui.
+            if self.controller.is_running():
+                self._register_hotkey()
         # A saved config replaces the preset baseline too, otherwise toggling
         # the event preset off would restore an overlay the operator has
         # since edited away.
@@ -1835,7 +2054,7 @@ class TrayApp(QObject):
         self._set_presentation(False)
         if restart:
             self.start_translation()
-        self.tray.showMessage(
+        self._notify(
             "CaptionBand",
             "Configurações salvas.",
             QSystemTrayIcon.MessageIcon.Information,
@@ -1860,7 +2079,7 @@ class TrayApp(QObject):
             return
         self._register_hotkey()
         self._show_overlays()
-        self.tray.showMessage(
+        self._notify(
             "Tradução iniciada",
             "Capturando áudio do sistema. Toque um vídeo no Teams para testar.",
             QSystemTrayIcon.MessageIcon.Information,
@@ -1870,7 +2089,7 @@ class TrayApp(QObject):
     def stop_translation(self) -> None:
         self._unregister_hotkey()
         self.controller.stop()
-        self.tray.showMessage(
+        self._notify(
             "Tradução parada",
             "Áudio do sistema não está mais sendo capturado.",
             QSystemTrayIcon.MessageIcon.Information,
@@ -1894,7 +2113,7 @@ class TrayApp(QObject):
         if was_running:
             self.controller.stop()
 
-        self.tray.showMessage(
+        self._notify(
             "Checagem pré-evento",
             "Testando provedor, credenciais e áudio. Toque um som para "
             "validar a captura.",
@@ -1961,6 +2180,7 @@ class TrayApp(QObject):
         self._apply_overlays(cfg)
         # Settings and the tray toggle are two views of the same flag.
         self.action_split.setChecked(bool(cfg.overlay.split_languages))
+        self.action_lock.setChecked(bool(cfg.overlay.locked))
         self._refresh_provider_label()
         self._update_tooltip()
 
@@ -2011,7 +2231,7 @@ class TrayApp(QObject):
             self._set_presentation(True)
             self._presentation_mode_active = True
             self.action_presentation.setChecked(True)
-            self.tray.showMessage(
+            self._notify(
                 "Modo evento",
                 ("Legenda bilíngue ({}) grande e fixa no rodapé, sem o idioma "
                  "falado. Clique no menu para voltar.".format(
@@ -2030,7 +2250,7 @@ class TrayApp(QObject):
             self._set_presentation(False)
             self._presentation_mode_active = False
             self.action_presentation.setChecked(False)
-            self.tray.showMessage(
+            self._notify(
                 "Modo evento desligado",
                 "Legenda voltou ao layout normal.",
                 QSystemTrayIcon.MessageIcon.Information,
@@ -2049,6 +2269,7 @@ class TrayApp(QObject):
         normally".
         """
         self.stop_translation()
+        self._unregister_stage_hotkeys()
         win = getattr(self, "settings_window", None)
         if win is not None:
             try:
@@ -2072,7 +2293,7 @@ class TrayApp(QObject):
         recording; 'Mostrar legenda' brings the band back.
         """
         self._hide_overlays()
-        self.tray.showMessage(
+        self._notify(
             "Legenda escondida",
             "A tradução continua rodando. Bandeja → 'Mostrar legenda' para "
             "voltar; para sair do app use Bandeja → 'Sair'.",
