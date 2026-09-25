@@ -186,7 +186,9 @@ def split_overlay_configs(cfg: AppConfig) -> tuple[AppConfig, AppConfig | None]:
         cfg, target_languages=targets[1:],
         display_mode="translations_only_multi" if len(targets) > 2 else "translations_only",
         overlay=replace(cfg.overlay, position=second_position,
-                        reserved_lines=2 * max(1, len(targets) - 1)),
+                        reserved_lines=2 * max(1, len(targets) - 1),
+                        # Each box remembers its own place.
+                        custom_rect=cfg.overlay.second_custom_rect),
     )
     return first, second
 
@@ -1264,8 +1266,14 @@ def keep_tray_owned(saved: AppConfig, current: AppConfig) -> AppConfig:
     a trava ao valor antigo, em silêncio. Um dono só por campo.
     """
     from dataclasses import replace
-    return replace(saved, overlay=replace(saved.overlay,
-                                          locked=current.overlay.locked))
+    cur, new = current.overlay, saved.overlay
+    # Onde as caixas ficaram também é da bandeja (arraste). Escolher OUTRA
+    # posição predefinida na tela é a forma de voltar ao preset.
+    return replace(saved, overlay=replace(
+        new, locked=cur.locked,
+        custom_rect=None if new.position != cur.position else cur.custom_rect,
+        second_custom_rect=(None if new.second_position != cur.second_position
+                            else cur.second_custom_rect)))
 
 
 class TrayApp(QObject):
@@ -1313,6 +1321,7 @@ class TrayApp(QObject):
         first_cfg, _second = split_overlay_configs(self.config)
         self.overlay = CaptionOverlay(first_cfg)
         self.overlay.close_requested.connect(self._on_overlay_close_requested)
+        self.overlay.geometry_edited.connect(lambda r: self._on_box_edited(r, second=False))
         # Second box for two-box bilingual mode; created lazily.
         self.overlay2: CaptionOverlay | None = None
         self.controller = TranslationController(self.config, self.overlay)
@@ -1432,7 +1441,7 @@ class TrayApp(QObject):
         self.action_overlay_hide.triggered.connect(self._hide_overlays)
         menu.addAction(self.action_overlay_hide)
 
-        self.action_overlay_reset = QAction("Reposicionar legenda", menu)
+        self.action_overlay_reset = QAction("Voltar caixas à posição padrão", menu)
         self.action_overlay_reset.triggered.connect(self._reposition_overlays)
         menu.addAction(self.action_overlay_reset)
 
@@ -1610,8 +1619,27 @@ class TrayApp(QObject):
             log.info("ui: atalho → esconder legenda")
 
     def _reposition_overlays(self) -> None:
-        for o in self._overlays():
-            o.reposition()
+        """Volta as caixas ao preset e esquece onde o operador as deixou."""
+        self._set_box_rects(custom_rect=None, second_custom_rect=None)
+
+    def _on_box_edited(self, rect, second: bool) -> None:
+        """A caixa foi arrastada ou redimensionada: fica onde ficou, e
+        sobrevive a Iniciar, troca de idioma, Salvar, Modo evento e reabrir."""
+        rect = tuple(float(v) for v in rect)
+        self._set_box_rects(**{"second_custom_rect" if second else "custom_rect": rect})
+
+    def _set_box_rects(self, **rects) -> None:
+        from dataclasses import replace
+        overlay = replace(self.config.overlay, **rects)
+        # O Modo evento guarda a config de antes dele; sem acompanhar aqui,
+        # sair do Modo evento devolveria a caixa ao lugar antigo.
+        if self._saved_overlay_config is not None:
+            self._saved_overlay_config = replace(self._saved_overlay_config, **rects)
+        self._apply_config(replace(self.config, overlay=overlay))
+        try:
+            save_config(self.config)
+        except Exception:
+            log.exception("could not persist the box geometry")
 
     def _set_presentation(self, on: bool) -> None:
         for o in self._overlays():
@@ -1628,6 +1656,8 @@ class TrayApp(QObject):
         if self.overlay2 is None:
             self.overlay2 = CaptionOverlay(second)
             self.overlay2.close_requested.connect(self._on_overlay_close_requested)
+            self.overlay2.geometry_edited.connect(
+                lambda r: self._on_box_edited(r, second=True))
             self.controller.caption_ready.connect(self.overlay2.push_caption)
             self.overlay2.set_presentation(self._presentation_mode_active)
         else:

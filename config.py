@@ -131,6 +131,15 @@ class OverlayConfig:
     # one at the bottom" and "side by side" are both just where you drop them.
     split_languages: bool = False
     second_position: str = "top"
+    # Onde o operador DEIXOU cada caixa (arraste e redimensionar), como
+    # frações da área útil da tela: (x, y, largura, altura). None = usa o
+    # preset (`position`, `width_ratio`). Frações, e não pixels, para a
+    # mesma config cair no mesmo lugar num projetor de outra resolução.
+    # MEDIDO em 25/09/2026 com o mouse real: o arraste sempre moveu a
+    # janela; o que não existia era memória — qualquer Iniciar, troca de
+    # idioma, Salvar ou Modo evento devolvia a caixa ao preset.
+    custom_rect: tuple[float, float, float, float] | None = None
+    second_custom_rect: tuple[float, float, float, float] | None = None
     # Which monitor carries the caption (QScreen.name()). Empty = primary.
     # At an event the projector is usually the SECOND screen in "extend"
     # mode, and a caption pinned to the laptop panel is invisible to the room.
@@ -338,8 +347,11 @@ def _coerce_value(value: object, default: object) -> object:
         # iterated as characters); only real sequences are accepted.
         return list(value) if isinstance(value, (list, tuple)) else _INVALID
     if default is None:
-        # Optional field (e.g. device_name: str | None). Accept scalars.
-        return value if isinstance(value, (str, int, float, bool)) else _INVALID
+        # Optional field (e.g. device_name: str | None). Accept scalars, and
+        # a sequence for the box rectangles (JSON has no tuples).
+        if isinstance(value, (str, int, float, bool)):
+            return value
+        return tuple(value) if isinstance(value, (list, tuple)) else _INVALID
     return value
 
 

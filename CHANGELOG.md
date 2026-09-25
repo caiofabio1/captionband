@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-25
+
+Reportado pelo operador: "Não consigo mover as caixas de legenda, nem
+redimensioná-las". Medido com o mouse real, pelo hit-test do Windows: o
+arraste sempre moveu a janela. O que faltava era o resto.
+
+### Fixed
+
+- **A caixa não lembrava onde foi deixada.** Qualquer Iniciar, troca de
+  idioma, Salvar em Configurações ou Modo evento recalculava a posição a
+  partir do preset e devolvia a caixa ao lugar de antes; ao reabrir o app,
+  idem. Agora cada caixa guarda a própria posição e tamanho, como frações
+  da tela (a mesma config cai no mesmo lugar num projetor de outra
+  resolução), e sobrevive a tudo isso. Escolher outra posição predefinida
+  em Configurações, ou "Voltar caixas à posição padrão" na bandeja, volta
+  ao preset.
+
+### Added
+
+- **Redimensionar pela borda.** Puxar a borda direita muda a largura (o
+  texto requebra), a inferior muda a altura, o canto muda as duas. O cursor
+  muda ao passar pela borda. Tamanho mínimo de 240 px de largura. A trava
+  de posição trava o redimensionar também.
+- **Caixa vazia explica o que fazer.** Com a tradução parada não havia nada
+  na tela para arrastar. "Mostrar legenda" na bandeja mostra as caixas
+  vazias com a dica "Arraste para mover · borda direita e inferior
+  redimensionam · fica guardado" (ou "Legenda travada…"). Nunca no Modo
+  evento: a plateia não precisa saber.
+
 ## [0.11.0] - 2026-09-25
 
 A caixa de legenda, depois de um painel de 3 modelos (Gemini 3.1 Pro, Kimi

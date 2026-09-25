@@ -1246,6 +1246,12 @@ class SettingsWindow(QDialog):
         for code, label in POSITIONS.items():
             self.second_position_combo.addItem(label, code)
         pl.addRow("Posição da 2ª caixa:", self.second_position_combo)
+        pl.addRow(self._wrap_label(
+            "<small>Na tela, <b>arraste</b> a caixa para movê-la e puxe a <b>borda "
+            "direita ou inferior</b> para redimensionar; fica guardado. Com a "
+            "tradução parada, use \"Mostrar legenda\" na bandeja para ver as caixas "
+            "vazias e arrumá-las. Escolher uma posição aqui (ou \"Voltar caixas à "
+            "posição padrão\" na bandeja) volta ao padrão.</small>"))
         self.layout_combo.currentIndexChanged.connect(
             lambda _i: self._sync_layout_labels())
         # A posicao da 1a banda sai da lista da 2a: duas bandas no mesmo lugar

@@ -107,6 +107,12 @@ class CaptionOverlay(QWidget):
 
     close_requested = pyqtSignal()
     # Emitted when the user clicks the in-overlay × (the tray hides the band)
+    geometry_edited = pyqtSignal(object)
+    # Emitted on mouse release after a drag or a resize: (x, y, w, h) as
+    # fractions of the screen's available area — what the tray remembers.
+
+    RESIZE_GRIP_PX = 16           # right / bottom edge band that resizes
+    MIN_W = 240
 
     # Best-practice timings
     MIN_DISPLAY_MS = 800           # min time current caption stays before scroll
@@ -137,6 +143,9 @@ class CaptionOverlay(QWidget):
 
         self._dragging = False
         self._drag_offset = QPoint()
+        self._resizing = (False, False)          # (right edge, bottom edge)
+        self._resize_anchor = (QPoint(), self.size())
+        self._press_geometry = self.geometry()
         self._presentation = False
         # O operador mandou esconder (bandeja, atalho ou o × da faixa). Fala
         # nova NÃO reabre a faixa enquanto isto estiver ligado. Sem este
@@ -231,6 +240,7 @@ class CaptionOverlay(QWidget):
         self.setWindowFlags(flags)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setMouseTracking(True)              # resize cursor on the edges
 
     def _screen(self):
         """The monitor the caption belongs on: the configured one, else primary.
@@ -257,11 +267,37 @@ class CaptionOverlay(QWidget):
             self._close_btn.setVisible(not self._presentation)
         self._request_repaint()
 
+    def _min_height(self) -> int:
+        return self.overlay_config.padding * 2 + 20
+
+    def _ratios(self) -> tuple[float, float, float, float]:
+        """This box's geometry as fractions of its screen's available area."""
+        geo = self._screen().availableGeometry()
+        g = self.geometry()
+        return (round((g.x() - geo.x()) / geo.width(), 4),
+                round((g.y() - geo.y()) / geo.height(), 4),
+                round(g.width() / geo.width(), 4),
+                round(g.height() / geo.height(), 4))
+
     def _apply_position(self) -> None:
         screen = self._screen()
         if screen is None:
             return
         geo = screen.availableGeometry()
+        custom = getattr(self.overlay_config, "custom_rect", None)
+        if custom:
+            # Where the operator left the box. Clamped to the screen: a rect
+            # remembered on the projector must still be reachable on the
+            # laptop panel after the projector is unplugged.
+            rx, ry, rw, rh = (float(v) for v in custom)
+            width = max(self.MIN_W, int(rw * geo.width()))
+            height = max(self._min_height(), int(rh * geo.height()))
+            x = geo.x() + int(rx * geo.width())
+            y = geo.y() + int(ry * geo.height())
+            x = min(max(x, geo.x()), geo.x() + geo.width() - width)
+            y = min(max(y, geo.y()), geo.y() + geo.height() - height)
+            self.setGeometry(x, y, width, height)
+            return
         width = int(geo.width() * self.overlay_config.width_ratio)
         height = self._estimate_height()
         x = geo.x() + (geo.width() - width) // 2
@@ -889,6 +925,13 @@ class CaptionOverlay(QWidget):
 
         lines = self._compose_lines_with_lang()
         if not any(text for _, text, _, _, _ in lines):
+            hint = self._empty_hint()
+            if hint:
+                painter.setFont(QFont(cfg.font_family, max(9, cfg.secondary_font_size // 2)))
+                dim = QColor(cfg.secondary_color)
+                dim.setAlphaF(0.55)
+                painter.setPen(dim)
+                painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, hint)
             return
 
         primary_font = QFont(cfg.font_family, cfg.primary_font_size, QFont.Weight.Bold)
@@ -1130,26 +1173,68 @@ class CaptionOverlay(QWidget):
         painter.setPen(fill)
         painter.drawText(x, y, text)
 
-    # ------------------------------------------------------------------ drag
+    # ------------------------------------------------------------------ drag / resize
 
-    def mousePressEvent(self, event: QMouseEvent) -> None:
+    def _empty_hint(self) -> str:
+        """Text for a box the operator made visible with nothing in it — the
+        moment they are arranging the boxes before the event. Never on the
+        projection (presentation mode): the room does not need to know."""
+        if self._presentation:
+            return ""
+        if self.overlay_config.locked:
+            return "Legenda travada — destrave no menu da bandeja para mover"
+        return "Arraste para mover · borda direita e inferior redimensionam · fica guardado"
+
+    def _mouse_free(self) -> bool:
         # `locked`: a faixa posicionada para o evento não sai do lugar com um
         # esbarrão no mouse da máquina que projeta. O × tem o próprio botão e
         # continua respondendo.
-        if (event.button() == Qt.MouseButton.LeftButton
-                and not self.overlay_config.click_through
-                and not self.overlay_config.locked):
-            self._dragging = True
-            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+        return not self.overlay_config.click_through and not self.overlay_config.locked
+
+    def _edges_at(self, pos) -> tuple[bool, bool]:
+        return (pos.x() >= self.width() - self.RESIZE_GRIP_PX,
+                pos.y() >= self.height() - self.RESIZE_GRIP_PX)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._mouse_free():
+            gp = event.globalPosition().toPoint()
+            right, bottom = self._edges_at(event.position())
+            if right or bottom:
+                self._resizing = (right, bottom)
+                self._resize_anchor = (gp, self.size())
+            else:
+                self._dragging = True
+                self._drag_offset = gp - self.frameGeometry().topLeft()
+            self._press_geometry = self.geometry()
             event.accept()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        gp = event.globalPosition().toPoint()
         if self._dragging:
-            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            self.move(gp - self._drag_offset)
             event.accept()
+        elif any(self._resizing):
+            start, size = self._resize_anchor
+            w = size.width() + (gp.x() - start.x()) if self._resizing[0] else size.width()
+            h = size.height() + (gp.y() - start.y()) if self._resizing[1] else size.height()
+            self.resize(max(self.MIN_W, w), max(self._min_height(), h))
+            event.accept()
+        elif self._mouse_free():
+            right, bottom = self._edges_at(event.position())
+            self.setCursor({(True, True): Qt.CursorShape.SizeFDiagCursor,
+                            (True, False): Qt.CursorShape.SizeHorCursor,
+                            (False, True): Qt.CursorShape.SizeVerCursor}
+                           .get((right, bottom), Qt.CursorShape.OpenHandCursor))
+        else:
+            self.unsetCursor()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        was_editing = self._dragging or any(self._resizing)
         self._dragging = False
+        self._resizing = (False, False)
+        # A click that did not move anything is not an edit to remember.
+        if was_editing and self.geometry() != self._press_geometry:
+            self.geometry_edited.emit(self._ratios())
 
 
 def _demo() -> None:  # pragma: no cover

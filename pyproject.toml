@@ -1,6 +1,6 @@
 [project]
 name = "captionband"
-version = "0.11.0"
+version = "0.12.0"
 description = "Real-time webinar translation desktop app — Azure / Google / Groq / Whisper local — overlay PyQt6"
 authors = [{ name = "Caio Fábio Schlechta Portella" }]
 license = { file = "LICENSE" }
