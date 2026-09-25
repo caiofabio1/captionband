@@ -586,26 +586,8 @@ class TestConfigSurvivesAnInterruptedWrite:
             "resetting every setting must not be silent")
 
 
-# ------------------------------------------------------------------ overlay fit
-
-
-class TestShrinkBeforeDroppingLines:
-    def test_soft_floor_follows_the_operators_font_size(self):
-        """As an absolute 26 pt, the comfortable-shrink pass silently disabled
-        itself for every font below 30 pt — the loop condition is
-        `size - step >= floor`. The operator's live config is 25 pt, so the
-        band skipped shrinking entirely and went straight to discarding
-        history, which is the opposite of the design."""
-        from overlay_qt import CaptionOverlay as C
-
-        # 25 pt: a floor of 26 would make the first shrink unreachable.
-        floor_25 = C._min_fit_pt(C, 25)
-        assert floor_25 < 25 - C.FIT_STEP_PT, (
-            "at 25 pt the shrink pass can still never run")
-        # Never below readability from the back of a room.
-        assert C._min_fit_pt(C, 18) >= C.MIN_FIT_PT_HARD
-        # Large fonts still get a proportional, not absolute, allowance.
-        assert C._min_fit_pt(C, 60) > floor_25
+# The fit order of the band (history dropped before the type shrinks, and
+# the size held within one utterance) is covered in test_caption_readability.
 
 
 # ------------------------------------------------------------------ settings dialog

@@ -1278,6 +1278,7 @@ class TrayApp(QObject):
     _language_cycle_requested = pyqtSignal()
     _caption_toggle_requested = pyqtSignal()
     _start_stop_requested = pyqtSignal()
+    _clear_caption_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -1285,6 +1286,7 @@ class TrayApp(QObject):
         self._language_cycle_requested.connect(self._apply_pending_language)
         self._caption_toggle_requested.connect(self._toggle_caption_visibility)
         self._start_stop_requested.connect(self._on_start_stop_hotkey)
+        self._clear_caption_requested.connect(self._clear_caption)
         # Antes de qualquer balão: _notify grava aqui de qual balão veio o clique.
         self._balloon_fix_tab: str | None = None
         self._fix_tab: str | None = None
@@ -1582,6 +1584,17 @@ class TrayApp(QObject):
         for o in self._overlays():
             o.set_hidden_by_operator(True)
 
+    def _clear_caption(self) -> None:
+        """Metade GUI do atalho de limpar: a frase atual sai da tela agora.
+
+        Esconde a faixa como o fim de fala esconde (não como o operador
+        esconde): a próxima legenda a traz de volta sozinha.
+        """
+        log.info("ui: atalho → limpar legenda")
+        for o in self._overlays():
+            o.clear()
+            o.hide()
+
     def _toggle_caption_visibility(self) -> None:
         """Metade GUI do atalho de mostrar/esconder.
 
@@ -1796,6 +1809,8 @@ class TrayApp(QObject):
              self._caption_toggle_requested.emit, "mostrar/esconder legenda"),
             (self.config.hotkey_start_stop,
              self._start_stop_requested.emit, "iniciar/parar"),
+            (self.config.hotkey_clear_caption,
+             self._clear_caption_requested.emit, "limpar legenda"),
         )
         em_uso = {(self.config.azure_switch_hotkey or "").strip().lower()} - {""}
         for tecla, acao, rotulo in pedidos:
@@ -2020,9 +2035,10 @@ class TrayApp(QObject):
         cfg = keep_tray_owned(cfg, self.config)
         was_running = self.controller.is_running()
         hotkeys_changed = (
-            (cfg.hotkey_toggle_caption, cfg.hotkey_start_stop, cfg.azure_switch_hotkey)
+            (cfg.hotkey_toggle_caption, cfg.hotkey_start_stop,
+             cfg.hotkey_clear_caption, cfg.azure_switch_hotkey)
             != (self.config.hotkey_toggle_caption, self.config.hotkey_start_stop,
-                self.config.azure_switch_hotkey))
+                self.config.hotkey_clear_caption, self.config.azure_switch_hotkey))
         # Font, colours, position, display mode: the overlay applies these
         # live. Restarting the pipeline for them cut the captions for a few
         # seconds and split the transcript into two files mid-talk.
@@ -2032,6 +2048,7 @@ class TrayApp(QObject):
             cfg, overlay=self.config.overlay, display_mode=self.config.display_mode,
             hotkey_toggle_caption=self.config.hotkey_toggle_caption,
             hotkey_start_stop=self.config.hotkey_start_stop,
+            hotkey_clear_caption=self.config.hotkey_clear_caption,
             azure_switch_hotkey=self.config.azure_switch_hotkey,
         ) == self.config
         restart = was_running and not appearance_only

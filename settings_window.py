@@ -1341,11 +1341,18 @@ class SettingsWindow(QDialog):
         self.hotkey_start_stop_input.setPlaceholderText("ex: ctrl+f8 (vazio = desligado)")
         self.hotkey_start_stop_input.setMaximumWidth(220)
         kl.addRow("Iniciar/parar tradução:", self.hotkey_start_stop_input)
+        self.hotkey_clear_caption_input = QLineEdit()
+        self.hotkey_clear_caption_input.setPlaceholderText("ex: f7 (vazio = desligado)")
+        self.hotkey_clear_caption_input.setMaximumWidth(220)
+        kl.addRow("Limpar a frase atual:", self.hotkey_clear_caption_input)
         kl.addRow(self._wrap_label(
             "<small>Funcionam com qualquer janela em primeiro plano, com ou sem "
             "tradução rodando. <b>Parar pede dois toques em 3 segundos</b>, para "
-            "um toque sem querer não derrubar a legenda. Evite Ctrl+Alt+letra: no "
-            "teclado ABNT2 é a mesma combinação do AltGr.</small>"))
+            "um toque sem querer não derrubar a legenda. <b>Limpar</b> tira da "
+            "tela uma tradução errada ou constrangedora; a fala seguinte volta "
+            "normalmente. Evite Ctrl+Alt+letra (no teclado ABNT2 é a mesma "
+            "combinação do AltGr) e Esc (sai do modo apresentação do "
+            "PowerPoint).</small>"))
         outer.addWidget(keys_group)
         outer.addStretch(1)
 
@@ -1517,6 +1524,7 @@ class SettingsWindow(QDialog):
         self.azure_switch_hotkey_input.setText(self.config.azure_switch_hotkey or "")
         self.hotkey_toggle_caption_input.setText(self.config.hotkey_toggle_caption or "")
         self.hotkey_start_stop_input.setText(self.config.hotkey_start_stop or "")
+        self.hotkey_clear_caption_input.setText(self.config.hotkey_clear_caption or "")
         self.vocabulary_weight_spin.setValue(float(self.config.vocabulary_weight))
         self._refresh_vocabulary_count()
 
@@ -1635,6 +1643,7 @@ class SettingsWindow(QDialog):
             azure_switch_hotkey=self.azure_switch_hotkey_input.text().strip().lower(),
             hotkey_toggle_caption=self.hotkey_toggle_caption_input.text().strip().lower(),
             hotkey_start_stop=self.hotkey_start_stop_input.text().strip().lower(),
+            hotkey_clear_caption=self.hotkey_clear_caption_input.text().strip().lower(),
             openai_api_key=self.openai_api_key_input.text().strip(),
             google_credentials_json=self.google_creds_input_credentials.text().strip(),
             google_project_id=self.google_project_input_credentials.text().strip(),

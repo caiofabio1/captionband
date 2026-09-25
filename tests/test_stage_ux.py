@@ -214,12 +214,17 @@ class TestAtalhos:
         cfg = AppConfig()
         assert cfg.hotkey_toggle_caption == "f8"
         assert cfg.hotkey_start_stop == "ctrl+f8"
-        for tecla in (cfg.hotkey_toggle_caption, cfg.hotkey_start_stop):
+        # Limpar não é Esc: Esc sai do modo apresentação do PowerPoint.
+        assert cfg.hotkey_clear_caption == "f7"
+        for tecla in (cfg.hotkey_toggle_caption, cfg.hotkey_start_stop,
+                      cfg.hotkey_clear_caption):
             assert not ("ctrl" in tecla and "alt" in tecla)
+            assert tecla != "esc"
 
     def test_a_biblioteca_real_aceita_os_padroes(self):
         keyboard = pytest.importorskip("keyboard")
-        for tecla in (AppConfig().hotkey_toggle_caption, AppConfig().hotkey_start_stop):
+        for tecla in (AppConfig().hotkey_toggle_caption, AppConfig().hotkey_start_stop,
+                      AppConfig().hotkey_clear_caption):
             keyboard.parse_hotkey(tecla)          # levanta se inválido
 
     @pytest.mark.parametrize("armado,agora,esperado", [
@@ -292,13 +297,14 @@ class TestAtalhos:
         t.config = replace(AppConfig(), **cfg)
         t._caption_toggle_requested = types.SimpleNamespace(emit=lambda: None)
         t._start_stop_requested = types.SimpleNamespace(emit=lambda: None)
+        t._clear_caption_requested = types.SimpleNamespace(emit=lambda: None)
         return t
 
-    def test_registra_os_dois_atalhos_padrao(self, monkeypatch):
+    def test_registra_os_tres_atalhos_padrao(self, monkeypatch):
         reg = self._fake_keyboard(monkeypatch)
         t = self._tray_atalhos()
         t._register_stage_hotkeys()
-        assert reg == ["f8", "ctrl+f8"]
+        assert reg == ["f8", "ctrl+f8", "f7"]
 
     def test_registrar_de_novo_nao_duplica(self, monkeypatch):
         """Salvar Configurações re-registra; sem soltar antes, cada Salvar
@@ -307,13 +313,13 @@ class TestAtalhos:
         t = self._tray_atalhos()
         t._register_stage_hotkeys()
         t._register_stage_hotkeys()
-        assert reg == ["f8", "ctrl+f8"]
+        assert reg == ["f8", "ctrl+f8", "f7"]
 
     def test_atalho_igual_ao_do_idioma_fica_desligado_e_avisa(self, monkeypatch):
         reg = self._fake_keyboard(monkeypatch)
         t = self._tray_atalhos(hotkey_toggle_caption="f9", azure_switch_hotkey="f9")
         t._register_stage_hotkeys()
-        assert reg == ["ctrl+f8"]
+        assert reg == ["ctrl+f8", "f7"]
         assert t._balloon_fix_tab == "Legenda"
         assert "repetido" in t.tray.chamadas[-1][0].lower()
 
@@ -321,13 +327,14 @@ class TestAtalhos:
         reg = self._fake_keyboard(monkeypatch, invalidos=("xyz",))
         t = self._tray_atalhos(hotkey_start_stop="xyz")
         t._register_stage_hotkeys()
-        assert reg == ["f8"]
+        assert reg == ["f8", "f7"]
         assert "inválido" in t.tray.chamadas[-1][0].lower()
         assert t._balloon_fix_tab == "Legenda"
 
     def test_vazio_desliga(self, monkeypatch):
         reg = self._fake_keyboard(monkeypatch)
-        t = self._tray_atalhos(hotkey_toggle_caption="", hotkey_start_stop="")
+        t = self._tray_atalhos(hotkey_toggle_caption="", hotkey_start_stop="",
+                               hotkey_clear_caption="")
         t._register_stage_hotkeys()
         assert reg == []
 
@@ -420,6 +427,23 @@ class TestEsconderDuraAteOOperadorDesfazer:
                         detected_language="pt-BR", is_final=True)
         qapp.processEvents()
 
+    def test_limpar_tira_a_frase_da_tela_e_a_proxima_fala_volta(self, qapp):
+        """F7: uma tradução errada sai da tela agora. Não é "esconder pelo
+        operador" — a fala seguinte reabre a faixa sozinha."""
+        from overlay_qt import CaptionOverlay
+        ov = CaptionOverlay(_cfg())
+        try:
+            self._falar(ov, qapp, "frase constrangedora")
+            t = _tray(overlay=ov, overlay2=None, config=_cfg())
+            t._clear_caption()
+            assert ov._history == [] and ov.isVisible() is False
+            assert ov.is_hidden_by_operator() is False
+            self._falar(ov, qapp, "frase constrangedora")   # repetida: sem dedup
+            assert ov.isVisible() is True
+            assert [u.original for u in ov._history] == ["frase constrangedora"]
+        finally:
+            ov.close()
+
     def test_fala_nova_nao_reabre_a_faixa_escondida(self, qapp):
         """O defeito que existia: cada legenda chamava show()."""
         from overlay_qt import CaptionOverlay
@@ -493,10 +517,11 @@ class TestSalvarConfiguracoes:
         t._on_config_saved(janela_velha)
         assert t.config.overlay.locked is True
 
-    def test_trocar_so_o_atalho_rodando_nao_reinicia_a_legenda(self):
+    @pytest.mark.parametrize("campo", ["hotkey_toggle_caption", "hotkey_clear_caption"])
+    def test_trocar_so_o_atalho_rodando_nao_reinicia_a_legenda(self, campo):
         from dataclasses import replace
         t, eventos = self._tray_salvar(rodando=True)
-        t._on_config_saved(replace(t.config, hotkey_toggle_caption="f7"))
+        t._on_config_saved(replace(t.config, **{campo: "f11"}))
         assert "stop" not in eventos and "start" not in eventos
         assert "atalhos" in eventos and "f9" in eventos
 

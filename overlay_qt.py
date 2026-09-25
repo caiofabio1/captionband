@@ -25,9 +25,10 @@ Display modes:
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 from dataclasses import dataclass, field
 
-from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QPoint, QPointF, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
     QColor,
     QFont,
@@ -35,6 +36,7 @@ from PyQt6.QtGui import (
     QGuiApplication,
     QMouseEvent,
     QPainter,
+    QPixmap,
 )
 from PyQt6.QtWidgets import QApplication, QPushButton, QWidget
 
@@ -146,6 +148,12 @@ class CaptionOverlay(QWidget):
         # How many composed lines belong to the NEWEST utterance. The fixed
         # band may drop older lines when it overflows, never these.
         self._current_block_lines = 0
+        # Rendered lines, keyed by text + type + colours (see _line_pixmap).
+        self._line_cache: OrderedDict[tuple, QPixmap] = OrderedDict()
+        # (created_at_ms of the newest utterance, point size it was fitted
+        # at): the size a sentence shrank to is kept while THAT sentence keeps
+        # changing (partials, then the final). See _paint.
+        self._fit_lock: tuple[float | None, int] | None = None
         self._repaint_timer = QTimer(self)
         self._repaint_timer.setSingleShot(True)
         self._repaint_timer.setInterval(self.REPAINT_MIN_MS)
@@ -263,6 +271,15 @@ class CaptionOverlay(QWidget):
             y = geo.y() + 40
         elif position == "middle":
             y = geo.y() + (geo.height() - height) // 2
+            if self.overlay_config.split_languages:
+                # Two boxes: the other one sits in the top or the bottom
+                # slot. Keep clear of a band of this height in either, when
+                # the screen has room for three; otherwise stay centred and
+                # let the operator see the overlap in the preview.
+                lo = geo.y() + 40 + height + 8
+                hi = geo.y() + geo.height() - 80 - height - 8 - height
+                if lo <= hi:
+                    y = min(max(y, lo), hi)
         else:
             y = geo.y() + geo.height() - height - 80
 
@@ -318,11 +335,19 @@ class CaptionOverlay(QWidget):
         # na banda fixa. "Linhas anteriores visiveis" era um no-op acima de 1.
         # reserved_lines continua sendo PISO, entao aumentar a banda a mao
         # ainda funciona; ela so nao pode mais anular o max_history em silencio.
-        wanted = (max(0, int(getattr(cfg, "max_history", 0))) + 1) * per_utt
+        history = max(0, int(getattr(cfg, "max_history", 0)))
+        wanted = (history + 1) * per_utt
         lines = max(1, int(getattr(cfg, "reserved_lines", 3)), per_utt * 2, wanted)
+        # Same arithmetic as _heights() in _paint: every line costs its
+        # spacing + 6, and utterances are UTTERANCE_GAP_PX apart. The band
+        # used to be sized without those, 6 px per line and 14 per gap
+        # short — and the fit loop quietly shrank the type on every paint
+        # to make up the difference.
         # The newest utterance is primary; whatever else fits is secondary.
-        height = cfg.padding * 2 + primary * min(lines, per_utt * 2) + 6
+        height = cfg.padding * 2 + min(lines, per_utt * 2) * (primary + 6)
         height += max(0, lines - per_utt * 2) * (secondary + 6)
+        utterances = min(history + 1, max(1, -(-lines // per_utt)))
+        height += (utterances - 1) * self.UTTERANCE_GAP_PX
 
         screen = self._screen()
         if screen is not None:
@@ -401,6 +426,8 @@ class CaptionOverlay(QWidget):
         # trim history to new size
         if len(self._history) > self._max_total:
             self._history = self._history[-self._max_total:]
+        self._line_cache.clear()
+        self._fit_lock = None
         self._set_click_through(self.overlay_config.click_through)
         self._apply_position()
         self._request_repaint()
@@ -414,6 +441,7 @@ class CaptionOverlay(QWidget):
         # memory made the Settings preview drop its own sample caption on
         # the second click (same text within DEDUP_WINDOW_MS) — blank band.
         self._recent_seen.clear()
+        self._fit_lock = None
         self._request_repaint()
 
     # ------------------------------------------------------------------ dedup
@@ -422,13 +450,6 @@ class CaptionOverlay(QWidget):
         import time
         return time.monotonic() * 1000
 
-    # Smallest point size the fixed band may shrink the caption to before it
-    # starts dropping history lines instead. RELATIVE to the size the operator
-    # chose, not an absolute point value: as a hard 26 it silently disabled
-    # itself for every font below 30 pt, because the loop condition is
-    # `size - step >= floor`. The operator's live config is 25 pt, so the
-    # comfortable-shrink pass never ran at all and the band jumped straight to
-    # discarding history — the opposite of what this was written to do.
     # Barra colorida que identifica o idioma de cada linha. MEDIDO: com 4px,
     # espanhol e ingles saiam na MESMA cor de texto, mesmo tamanho e mesmo
     # peso — a barrinha era a unica distincao, invisivel do fundo de um
@@ -439,16 +460,12 @@ class CaptionOverlay(QWidget):
     # Folga vertical entre FALAS (nao entre os idiomas de uma mesma fala).
     UTTERANCE_GAP_PX = 14
 
-    MIN_FIT_RATIO = 0.72
-    # Absolute floor, used only when even the current utterance alone does not
-    # fit the band. Below this it is unreadable from the back of a room.
+    # Floor for shrinking the type, reached only when the current utterance
+    # ALONE does not fit the band. Below this it is unreadable from the back
+    # of a room.
     MIN_FIT_PT_HARD = 16
     # Point size step while shrinking. 4 overshoots on small fonts.
     FIT_STEP_PT = 2
-
-    def _min_fit_pt(self, configured: int) -> int:
-        """Comfortable floor for this operator's font size."""
-        return max(self.MIN_FIT_PT_HARD, int(configured * self.MIN_FIT_RATIO))
 
     # Hard ceiling on the dedup window, independent of time. DEDUP_WINDOW_MS
     # already bounds it in principle, but only for entries that pass through
@@ -798,8 +815,17 @@ class CaptionOverlay(QWidget):
         self.setFixedHeight(height)
         self._apply_position()
 
-    @staticmethod
-    def _wrap_lines(text: str, metrics: QFontMetrics, max_width: int) -> list[str]:
+    # Words that do not end a line (short articles, prepositions and
+    # conjunctions of PT/EN/ES). "…começa com o | estudo" reads worse than
+    # "…começa com | o estudo": the eye expects the noun right after them.
+    # Subtitle style guides call this breaking at a linguistic boundary.
+    NO_DANGLE = frozenset(
+        "a o e à ao as os um uma de do da dos das em no na nos nas por com que se "
+        "the an of to in on at by for from with and or "
+        "el la los las un una del al en y con para".split())
+
+    @classmethod
+    def _wrap_lines(cls, text: str, metrics: QFontMetrics, max_width: int) -> list[str]:
         if not text:
             return [""]
         words = text.split(" ")
@@ -811,6 +837,17 @@ class CaptionOverlay(QWidget):
                 current = candidate
             else:
                 if current:
+                    kept = current.split(" ")
+                    # A dangling "o"/"de"/"the" moves down with the word that
+                    # did not fit — the whole run of them ("con los"), or the
+                    # last one just gets exposed. Never empties the line.
+                    moved: list[str] = []
+                    while (len(kept) > 1 and kept[-1].isalpha()
+                           and kept[-1].lower() in cls.NO_DANGLE):
+                        moved.insert(0, kept.pop())
+                    if moved:
+                        word = " ".join(moved + [word])
+                        current = " ".join(kept)
                     lines.append(current)
                 current = word
         if current:
@@ -895,42 +932,43 @@ class CaptionOverlay(QWidget):
                 return out
 
             available = self.height() - cfg.padding * 2
-            heights = _heights()
-            # First make the TYPE yield, down to a floor: in the bilingual
-            # layout the block is one utterance in two languages, and
-            # dropping "the oldest line" there drops a whole language — the
-            # Spanish speakers read on while the English speakers get
-            # nothing (seen in an offscreen render: only 'La primera sesión…'
-            # survived). ponytail: recomputed per paint; a per-session
-            # hysteresis would stop the size hopping between utterances.
-            size = cfg.primary_font_size
             ratio = cfg.secondary_font_size / max(1, cfg.primary_font_size)
-            soft_floor = self._min_fit_pt(cfg.primary_font_size)
             step = self.FIT_STEP_PT
-            while sum(heights) > available and size - step >= soft_floor:
-                size -= step
-                primary_font = QFont(cfg.font_family, size, QFont.Weight.Bold)
-                secondary_font = QFont(cfg.font_family,
-                                       max(self.MIN_FIT_PT_HARD, int(size * ratio)),
-                                       QFont.Weight.Normal)
-                heights = _heights()
-            # Only then drop HISTORY lines (older utterances). The newest
-            # utterance is never cut: with "spoken + EN + ES" the old rule
+
+            def _fonts(pt: int) -> None:
+                nonlocal primary_font, secondary_font
+                primary_font = QFont(cfg.font_family, pt, QFont.Weight.Bold)
+                secondary_font = QFont(
+                    cfg.font_family, max(self.MIN_FIT_PT_HARD, int(pt * ratio)),
+                    QFont.Weight.Normal)
+
+            # The size a sentence already shrank to stays while THAT sentence
+            # keeps changing (partials, then the final). Refitting from the
+            # configured size on every event made the type pulse
+            # mid-sentence, which on a 4 m screen reads as flicker.
+            cur_key = self._history[-1].created_at_ms if self._history else None
+            size = cfg.primary_font_size
+            if self._fit_lock is not None and self._fit_lock[0] == cur_key:
+                size = min(size, self._fit_lock[1])
+                _fonts(size)
+            heights = _heights()
+            # Order, for a room reading from the back: drop OLDER utterances
+            # first, and shrink the type only when the newest utterance alone
+            # still does not fit. Shrinking first kept more history on screen
+            # at a size nobody past the third row could read. The newest
+            # utterance is never cut: with "spoken + EN + ES" an older rule
             # dropped the Portuguese and the English of the CURRENT sentence
-            # and left only Spanish — the operator saw the languages
-            # alternate from one sentence to the next.
+            # and left only Spanish — the languages alternated from one
+            # sentence to the next.
             keep = max(1, self._current_block_lines)
             while len(lines) > keep and sum(heights) > available:
                 lines.pop(0)
                 heights.pop(0)
-            # Still too tall with only the current utterance left: go smaller
-            # than the comfortable floor rather than clip a language.
             while sum(heights) > available and size - step >= self.MIN_FIT_PT_HARD:
                 size -= step
-                primary_font = QFont(cfg.font_family, size, QFont.Weight.Bold)
-                secondary_font = QFont(cfg.font_family, max(self.MIN_FIT_PT_HARD, int(size * ratio)),
-                                       QFont.Weight.Normal)
+                _fonts(size)
                 heights = _heights()
+            self._fit_lock = (cur_key, size)
             last_idx = len(lines) - 1
             if getattr(cfg, "anchor_newest", True):
                 # Bottom-anchor the block inside the fixed band so the NEWEST
@@ -958,13 +996,7 @@ class CaptionOverlay(QWidget):
                 line_alpha = alpha
                 slide_offset = 0
 
-            color = QColor(base)
-            color.setAlphaF(min(1.0, max(0.0, line_alpha)))
-            outline = QColor(outline_color)
-            outline.setAlphaF(min(1.0, max(0.0, line_alpha)))
-
             metrics = QFontMetrics(font)
-            painter.setFont(font)
             line_height = metrics.lineSpacing()
             wrapped = self._wrap_lines(text, metrics, inner_width)
 
@@ -993,12 +1025,8 @@ class CaptionOverlay(QWidget):
                     else self.LANG_BAR_PX) if lang_color else 0)
             text_x = max(x + 4, self._bar_x(cfg, _bw) + _bw + 10) if _bw else x + 4
             for line in wrapped:
-                self._draw_outlined_text(
-                    painter, line,
-                    text_x,
-                    y + slide_offset + metrics.ascent(),
-                    color, outline, font,
-                )
+                self._draw_line(painter, line, text_x, y + slide_offset,
+                                font, base, outline_color, line_alpha)
                 y += line_height
             y += 6
 
@@ -1019,6 +1047,68 @@ class CaptionOverlay(QWidget):
                 latency_text,
             )
 
+    # Every drawn line is kept as an image. Past ~64 device pixels of glyph
+    # height Qt leaves its glyph cache and traces each letter as a curve on
+    # every frame: MEASURED on the real band, screen at 125 %, 80 ms per
+    # paint at 54 pt (Modo evento) against 4 ms at 25 pt, for a 33 ms
+    # budget. Copying the finished image costs ~1 ms, and only a line whose
+    # text changed is rendered again.
+    LINE_CACHE_MAX = 32
+    LINE_PAD = 4                  # room for the 2 px outline offsets
+    # Over a solid box the outline adds nothing a reader can see, and it is
+    # 9 drawText calls per line instead of 1 — nearly the whole cost of
+    # rendering a line at large sizes. Kept for translucent backgrounds,
+    # where it is what keeps white text readable over a white slide.
+    OUTLINE_BELOW_BG_OPACITY = 0.6
+
+    def _line_pixmap(self, text: str, font: QFont, fill: QColor, outline: QColor) -> QPixmap:
+        dpr = self.devicePixelRatioF()
+        with_outline = self.overlay_config.background_opacity < self.OUTLINE_BELOW_BG_OPACITY
+        key = (text, font.family(), font.pointSize(), font.weight(),
+               fill.rgba(), outline.rgba(), with_outline, round(dpr, 3))
+        pm = self._line_cache.get(key)
+        if pm is not None:
+            self._line_cache.move_to_end(key)
+            return pm
+        metrics = QFontMetrics(font)
+        pad = self.LINE_PAD
+        w = max(metrics.horizontalAdvance(text), metrics.boundingRect(text).width()) + pad * 2
+        h = metrics.lineSpacing() + pad * 2
+        pm = QPixmap(max(1, int(w * dpr) + 1), max(1, int(h * dpr) + 1))
+        pm.setDevicePixelRatio(dpr)
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        if with_outline:
+            self._draw_outlined_text(p, text, pad, pad + metrics.ascent(), fill, outline, font)
+        else:
+            p.setFont(font)
+            p.setPen(fill)
+            p.drawText(pad, pad + metrics.ascent(), text)
+        p.end()
+        self._line_cache[key] = pm
+        while len(self._line_cache) > self.LINE_CACHE_MAX:
+            self._line_cache.popitem(last=False)
+        return pm
+
+    def _draw_line(self, painter: QPainter, text: str, x: int, top: int,
+                   font: QFont, fill: QColor, outline: QColor, alpha: float) -> None:
+        """One wrapped line with its top-left at (x, top).
+
+        Dimming of older lines and the fade-in of the newest one are painter
+        opacity over the cached image, so one image serves every alpha.
+        """
+        pm = self._line_pixmap(text, font, fill, outline)
+        dpr = self.devicePixelRatioF()
+        # Snap to the device pixel grid: at 125 % an integer logical x lands
+        # on a quarter pixel and the copy would be resampled — soft text.
+        pos = QPointF(round((x - self.LINE_PAD) * dpr) / dpr,
+                      round((top - self.LINE_PAD) * dpr) / dpr)
+        painter.setOpacity(min(1.0, max(0.0, alpha)))
+        painter.drawPixmap(pos, pm)
+        painter.setOpacity(1.0)
+
     @staticmethod
     def _draw_outlined_text(
         painter: QPainter,
@@ -1029,10 +1119,9 @@ class CaptionOverlay(QWidget):
         outline: QColor,
         font: QFont,
     ) -> None:
-        # Glyph-run text with an 8-direction offset "outline". Stroking a
-        # QPainterPath of the text cost 82 ms per frame with nine lines
-        # (measured with the operator's config), and the overlay repaints on
-        # every partial — the tray menu stopped responding.
+        # Glyph-run text with an 8-direction offset "outline". Runs only
+        # while a cached line is built (see _line_pixmap), and only over a
+        # translucent background.
         painter.setFont(font)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(outline)

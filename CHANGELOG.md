@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-25
+
+A caixa de legenda, depois de um painel de 3 modelos (Gemini 3.1 Pro, Kimi
+K3, GPT-OSS) julgado contra o código e contra as guias de legenda. O achado
+que mandou na ordem não veio do painel, veio de medir.
+
+### Fixed
+
+- **O Modo evento pintava a 80 ms por quadro.** Na faixa real, tela a 125 %:
+  25 pt em 4,4 ms, 36 pt em 5,8 ms, **48 pt em 73 ms e 54 pt em 81 ms**, para
+  um orçamento de 33 ms. Acima de ~64 px de altura o Qt deixa o cache de
+  letras e traça cada uma como curva a cada quadro. A conclusão de setembro
+  de que "a pintura não é o problema" tinha sido medida só a 25 pt. Agora
+  cada linha desenhada fica guardada como imagem e só a linha cujo texto
+  mudou é redesenhada: **54 pt em 1,9 ms** (25 pt em 1,6 ms). Sobre fundo
+  sólido o contorno deixa de ser desenhado — não se via, e eram 9 desenhos
+  por linha em vez de 1; segue existindo sobre fundo translúcido.
+- **A banda fixa era calculada menor do que a pintura precisa** (6 px por
+  linha e 14 px entre falas), e a fonte encolhia um ou dois pontos em toda
+  pintura para compensar. Com a ordem nova de encaixe isso apareceu: a
+  banda soltava a fala mais antiga que devia mostrar.
+
+### Changed
+
+- **Ordem do encaixe invertida** (3 de 3 modelos, confirmado no código): a
+  banda agora solta falas antigas antes de encolher a letra, e só encolhe
+  quando a fala atual sozinha não cabe. Para quem lê do fundo da sala, uma
+  legenda legível com menos histórico vale mais que uma completa e pequena.
+  O tamanho a que uma frase encolheu fica travado enquanto essa frase muda
+  (parciais, depois o final); a frase seguinte volta ao tamanho configurado.
+  Antes o tamanho era recalculado a cada evento e pulsava dentro da frase.
+- **Quebra de linha respeita a frase:** "o", "de", "the", "la" e afins não
+  ficam sozinhos no fim da linha; descem com a palavra seguinte. Regra das
+  guias de legenda (quebra em fronteira linguística).
+
+### Added
+
+- **F7 limpa a frase atual** da tela — uma tradução errada ou
+  constrangedora sai na hora; a fala seguinte volta normalmente. Não é Esc,
+  que sai do modo apresentação do PowerPoint. Configurável na aba Legenda.
+
 ## [0.10.0] - 2026-09-25
 
 Três ajustes de operação durante o evento, tirados do que o Sokuji e o

@@ -46,22 +46,25 @@ def _cfg(**overlay_kw) -> AppConfig:
                      overlay=OverlayConfig(**base))
 
 
-def _drawn(monkeypatch, overlay, qapp) -> list[tuple[int, str, int]]:
-    """Every line the REAL paint path puts on screen: (top_y, text, x)."""
-    rows: list[tuple[int, str, int]] = []
-    original = CaptionOverlay._draw_outlined_text
+def _drawn_pt(monkeypatch, overlay, qapp) -> list[tuple[int, str, int, int]]:
+    """Every line the REAL paint path puts on screen: (top_y, text, x, pt)."""
+    rows: list[tuple[int, str, int, int]] = []
+    original = CaptionOverlay._draw_line
 
-    def spy(painter, text, x, y, fill, outline, font=None, *a, **k):
-        metrics = QFontMetrics(font if font is not None else painter.font())
-        rows.append((y - metrics.ascent(), text, x))
-        return original(painter, text, x, y, fill, outline, font, *a, **k)
+    def spy(self, painter, text, x, top, font, fill, outline, alpha):
+        rows.append((top, text, x, font.pointSize()))
+        return original(self, painter, text, x, top, font, fill, outline, alpha)
 
-    monkeypatch.setattr(CaptionOverlay, "_draw_outlined_text", staticmethod(spy))
+    monkeypatch.setattr(CaptionOverlay, "_draw_line", spy)
     pixmap = QPixmap(overlay.size())
     painter = QPainter(pixmap)
     overlay.render(painter)
     painter.end()
     return sorted(rows)
+
+
+def _drawn(monkeypatch, overlay, qapp) -> list[tuple[int, str, int]]:
+    return [(top, text, x) for top, text, x, _pt in _drawn_pt(monkeypatch, overlay, qapp)]
 
 
 def _speak(overlay, qapp, sentences) -> None:
@@ -76,7 +79,10 @@ def _speak(overlay, qapp, sentences) -> None:
 
 
 class TestPastCaptionsActuallyAppear:
-    @pytest.mark.parametrize("max_history", [0, 1, 2, 3])
+    # 3 falas anteriores a 25 pt passam da metade da tela num notebook de
+    # 864 px: a banda para no teto e mostra o que cabe, em tamanho cheio
+    # (TestHistoryYieldsBeforeTheType). Até 2 tem de caber inteiro.
+    @pytest.mark.parametrize("max_history", [0, 1, 2])
     def test_the_band_grows_to_fit_the_history_it_promises(
             self, qapp, monkeypatch, max_history):
         """Storing the history is not the same as showing it.
@@ -138,6 +144,160 @@ class TestLanguagesAreTellableApart:
     def test_the_language_bar_is_visible_from_a_distance(self):
         """4 px on a projected band is not a language indicator."""
         assert CaptionOverlay.LANG_BAR_PX >= 10
+
+
+LONGA = "A primeira sessão começa agora com os resultados do estudo"   # ~2 lines at 600 px
+
+
+def _push(overlay, qapp, text, rid, final=True):
+    overlay.push_caption(text, {"es": f"ES {text}", "en": f"EN {text}"},
+                         detected_language="pt-BR", is_final=final, result_id=rid)
+    qapp.processEvents()
+
+
+class TestHistoryYieldsBeforeTheType:
+    """Painel de 3 modelos, 3/3: para quem lê do fundo da sala, uma legenda
+    legível com menos histórico vale mais que uma completa e pequena. A
+    ordem anterior encolhia a fonte até 72 % antes de descartar falas."""
+
+    def test_older_utterances_are_dropped_and_the_size_is_kept(self, qapp, monkeypatch):
+        overlay = CaptionOverlay(_cfg(max_history=2))
+        overlay.resize(600, overlay.height())      # narrow: every sentence wraps
+        overlay.show()
+        qapp.processEvents()
+        try:
+            for i in range(3):
+                _push(overlay, qapp, f"{LONGA} {i}", rid=f"r{i}")
+            rows = _drawn_pt(monkeypatch, overlay, qapp)
+            texts = {t for _y, t, _x, _pt in rows}
+            assert any(t.startswith("ES ") for t in texts), "nada desenhado"
+            assert len(rows) > 2, "a frase devia quebrar em várias linhas neste teste"
+            assert {pt for _y, _t, _x, pt in rows} == {25}, (
+                "encolheu a fonte em vez de soltar o histórico")
+            shown = {t.split()[-1] for t in texts}      # the "0"/"1"/"2" suffix
+            assert "2" in shown and "0" not in shown, shown
+        finally:
+            overlay.close()
+
+    def test_a_shrunk_sentence_keeps_its_size_until_the_next_one(self, qapp, monkeypatch):
+        """Refitting from the configured size on every partial made the type
+        pulse mid-sentence. The size is held per utterance."""
+        overlay = CaptionOverlay(_cfg(max_history=0, reserved_lines=1))
+        overlay.resize(600, overlay.height())
+        overlay.show()
+        qapp.processEvents()
+        try:
+            _push(overlay, qapp, " ".join([LONGA] * 3), rid="r1", final=False)
+            partial = {pt for *_r, pt in _drawn_pt(monkeypatch, overlay, qapp)}
+            assert partial and max(partial) < 25, "a frase longa devia forçar encolher"
+            _push(overlay, qapp, "curta", rid="r1", final=True)   # same utterance, rewritten
+            final = {pt for *_r, pt in _drawn_pt(monkeypatch, overlay, qapp)}
+            assert final == partial, f"pulsou dentro da fala: {partial} -> {final}"
+            _push(overlay, qapp, "outra curta", rid="r2")
+            assert {pt for *_r, pt in _drawn_pt(monkeypatch, overlay, qapp)} == {25}
+        finally:
+            overlay.close()
+
+
+class TestLinesAreCachedImages:
+    """MEDIDO na faixa real, tela a 125 %: 80 ms por pintura a 54 pt contra
+    4 ms a 25 pt (orçamento de 33 ms), porque acima de ~64 px o Qt traça
+    cada letra como curva a cada quadro. Uma linha é desenhada UMA vez."""
+
+    def _count_renders(self, monkeypatch):
+        calls = []
+        original = CaptionOverlay._line_pixmap
+
+        def spy(self, text, font, fill, outline):
+            before = len(self._line_cache)
+            pm = original(self, text, font, fill, outline)
+            if len(self._line_cache) != before:
+                calls.append(text)
+            return pm
+
+        monkeypatch.setattr(CaptionOverlay, "_line_pixmap", spy)
+        return calls
+
+    def test_second_paint_renders_nothing_again(self, qapp, monkeypatch):
+        overlay = CaptionOverlay(_cfg(max_history=1))
+        overlay.show()
+        qapp.processEvents()
+        try:
+            renders = self._count_renders(monkeypatch)
+            _push(overlay, qapp, "um", rid="r1")
+            _push(overlay, qapp, "dois", rid="r2")
+            _drawn(monkeypatch, overlay, qapp)
+            first = list(renders)
+            assert sorted(first) == ["EN dois", "EN um", "ES dois", "ES um"]
+            _drawn(monkeypatch, overlay, qapp)
+            assert renders == first, "repintar sem mudança renderizou de novo"
+            # The new sentence, plus "dois" once more: demoted to history it
+            # is a different image (normal weight, dimmer colour).
+            _push(overlay, qapp, "três", rid="r3")
+            _drawn(monkeypatch, overlay, qapp)
+            assert sorted(renders[len(first):]) == ["EN dois", "EN três", "ES dois", "ES três"]
+            n = len(renders)
+            _drawn(monkeypatch, overlay, qapp)
+            assert len(renders) == n
+        finally:
+            overlay.close()
+
+    def test_outline_only_over_a_translucent_background(self, qapp, monkeypatch):
+        """Sobre fundo sólido o contorno é invisível e custa 9 drawText por
+        linha em vez de 1 — quase todo o custo de renderizar a 54 pt."""
+        outlined = []
+        monkeypatch.setattr(
+            CaptionOverlay, "_draw_outlined_text",
+            staticmethod(lambda p, text, *a: outlined.append(text)))
+        for opacity, expect in ((0.85, 0), (0.3, 2)):
+            outlined.clear()
+            overlay = CaptionOverlay(_cfg(max_history=0, background_opacity=opacity))
+            overlay.show()
+            qapp.processEvents()
+            try:
+                _push(overlay, qapp, "um", rid="r1")
+                _drawn(monkeypatch, overlay, qapp)
+                assert len(outlined) == expect, (opacity, outlined)
+            finally:
+                overlay.close()
+
+    def test_the_cache_is_bounded(self, qapp, monkeypatch):
+        overlay = CaptionOverlay(_cfg(max_history=0))
+        overlay.show()
+        qapp.processEvents()
+        try:
+            for i in range(CaptionOverlay.LINE_CACHE_MAX):
+                _push(overlay, qapp, f"frase {i}", rid=f"r{i}")
+                _drawn(monkeypatch, overlay, qapp)
+            assert len(overlay._line_cache) == CaptionOverlay.LINE_CACHE_MAX
+        finally:
+            overlay.close()
+
+
+class _CharMetrics:
+    def horizontalAdvance(self, s):
+        return len(s)
+
+
+class TestNoDanglingLittleWord:
+    def _wrap(self, text, width):
+        return CaptionOverlay._wrap_lines(text, _CharMetrics(), width)
+
+    def test_article_moves_down_with_its_noun(self):
+        assert self._wrap("começa agora com o estudo", 18) == ["começa agora", "com o estudo"]
+        assert self._wrap("starts now with the study", 19) == ["starts now", "with the study"]
+
+    def test_a_run_of_little_words_moves_together(self):
+        """Seen on the real band: moving only "los" left "con" dangling."""
+        assert self._wrap("empieza ahora con los resultados", 22) == [
+            "empieza ahora", "con los resultados"]
+
+    def test_other_words_break_greedily_as_before(self):
+        assert self._wrap("começa agora sim estudo hoje", 18) == ["começa agora sim", "estudo hoje"]
+
+    def test_a_line_is_never_emptied_and_punctuation_is_a_pause(self):
+        assert self._wrap("o estudooooooooooo", 5) == ["o", "estudooooooooooo"]
+        assert self._wrap("vem com, estudo", 8) == ["vem com,", "estudo"]
         assert CaptionOverlay.LANG_BAR_PX_PRESENTATION > CaptionOverlay.LANG_BAR_PX
 
     def test_each_target_language_gets_its_own_bar_colour(self, qapp):

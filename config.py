@@ -166,6 +166,10 @@ class AppConfig:
     # Parar pede um segundo toque em poucos segundos (ver TrayApp): um toque
     # sem querer não pode derrubar a legenda no meio de uma fala.
     hotkey_start_stop: str = "ctrl+f8"
+    # Tira a frase atual da tela (tradução errada ou constrangedora); a fala
+    # seguinte volta normalmente. Não é Esc: Esc sai do modo apresentação do
+    # PowerPoint.
+    hotkey_clear_caption: str = "f7"
 
 
 
