@@ -35,7 +35,9 @@ import azure.cognitiveservices.speech as speechsdk
 
 from constants import (
     AZURE_AT_START_LID_MAX_LANGUAGES,
+    AZURE_SEGMENTATION_MAX_TIME_MS,
     AZURE_SEGMENTATION_SILENCE_MS,
+    AZURE_SEGMENTATION_STRATEGIES,
     AZURE_STABLE_PARTIAL_THRESHOLD,
 )
 from vocabulary import clamp_weight
@@ -87,6 +89,22 @@ def canceled_message(code: str, details: str, reason) -> str:
 RECONNECT_DELAYS_S = (1, 2, 5, 10, 20)
 
 
+def segmentation_properties(strategy: str) -> list[tuple]:
+    """Extra recognizer properties for the chosen segmentation strategy.
+
+    "default" adds nothing, so a session that never touched the setting
+    behaves exactly as before. "time" needs the silence timeout as well; the
+    caller always sets that one.
+    """
+    pid = speechsdk.PropertyId
+    if strategy == "semantic":
+        return [(pid.Speech_SegmentationStrategy, "Semantic")]
+    if strategy == "time":
+        return [(pid.Speech_SegmentationStrategy, "Time"),
+                (pid.Speech_SegmentationMaximumTimeMs, str(AZURE_SEGMENTATION_MAX_TIME_MS))]
+    return []
+
+
 class AzureProvider(TranslationProvider):
     # Both modes run ONE continuous TranslationRecognizer over a single
     # PushAudioInputStream, and the SDK delivers that session's callbacks
@@ -112,6 +130,7 @@ class AzureProvider(TranslationProvider):
         streaming_language: str = "pt-BR",
         phrases: list[str] | None = None,
         phrase_weight: float = 1.0,
+        segmentation: str = "default",
     ):
         if not speech_key:
             raise ValueError("Azure speech_key required")
@@ -138,6 +157,8 @@ class AzureProvider(TranslationProvider):
         self.streaming_language = streaming_language
         self.phrases = list(phrases or [])
         self.phrase_weight = phrase_weight
+        # Unknown value (hand-edited config) falls back to the service default.
+        self.segmentation = segmentation if segmentation in AZURE_SEGMENTATION_STRATEGIES else "default"
 
         self._push_stream: speechsdk.audio.PushAudioInputStream | None = None
         self._recognizer: speechsdk.translation.TranslationRecognizer | None = None
@@ -169,6 +190,8 @@ class AzureProvider(TranslationProvider):
             speechsdk.PropertyId.Speech_SegmentationSilenceTimeoutMs,
             str(AZURE_SEGMENTATION_SILENCE_MS),
         )
+        for prop, value in segmentation_properties(self.segmentation):
+            translation_config.set_property(prop, value)
         # Ask the SERVICE for steadier partials instead of guessing at
         # stabilisation in the overlay. Microsoft's captioning guidance names
         # this as the knob for exactly our symptom: "Requesting more stable

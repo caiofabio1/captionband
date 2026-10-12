@@ -12,7 +12,7 @@ from __future__ import annotations
 
 APP_NAME = "CaptionBand"
 APP_DISPLAY_NAME = "CaptionBand"
-APP_VERSION = "0.12.0"  # keep in step with installer.iss and pyproject.toml
+APP_VERSION = "0.13.0"  # keep in step with installer.iss and pyproject.toml
 APP_GITHUB_REPO = "caiofabio1/captionband"
 
 
@@ -97,6 +97,15 @@ AZURE_SEGMENTATION_SILENCE_MS = 400
 # read 2026-09-15). The projected translation was being rewritten on every
 # partial, which is unreadable from the back of a room.
 AZURE_STABLE_PARTIAL_THRESHOLD = 5
+# Segmentation strategy (Speech_SegmentationStrategy). "default" sets nothing:
+# the service closes a phrase on silence. "semantic" closes at sentence-ending
+# punctuation instead — Microsoft documents it against the "wall of text" a
+# speaker who never pauses produces. "time" keeps silence segmentation but
+# caps a phrase: as it approaches AZURE_SEGMENTATION_MAX_TIME_MS the silence
+# timeout shrinks until the phrase closes. Documented range 20000-70000 ms.
+# learn.microsoft.com/azure/ai-services/speech-service/how-to-recognize-speech
+AZURE_SEGMENTATION_STRATEGIES = ("default", "semantic", "time")
+AZURE_SEGMENTATION_MAX_TIME_MS = 20000
 
 # Azure: at-start language identification accepts at most 4 candidate
 # languages; continuous LID accepts 10 ("You can include up to four languages

@@ -106,6 +106,9 @@ class OverlayConfig:
     # o menu da bandeja (ver TrayApp.toggle_lock); o × de esconder continua
     # funcionando.
     locked: bool = False
+    # A fala nova chega com um fundo levemente tingido que some em ~2 s: o
+    # olho acha a linha nova sem ler a faixa inteira. Uma vez por fala.
+    highlight_new_text: bool = True
     max_chars: int = 220
     font_family: str = "Segoe UI"
     # Auto-concatenate consecutive utterances within this gap if same language.
@@ -156,6 +159,10 @@ class AppConfig:
     # (incremental "word-by-word with correction" via the `recognizing` event).
     # Trade-off: must know the source language up front (no Continuous LID).
     azure_streaming_mode: bool = False
+    # How Azure decides a phrase has ended: "default" (silence), "semantic"
+    # (sentence punctuation) or "time" (silence with a 20 s cap). See
+    # constants.AZURE_SEGMENTATION_STRATEGIES. Changing it restarts the session.
+    azure_segmentation: str = "default"
     # Currently active source language when streaming_mode is on. Tray menu /
     # global hotkey can change this at runtime via TrayApp.switch_source_language().
     azure_streaming_language: str = "pt-BR"

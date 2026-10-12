@@ -25,6 +25,7 @@ Display modes:
 from __future__ import annotations
 
 import logging
+import sys
 from collections import OrderedDict
 from dataclasses import dataclass, field
 
@@ -34,6 +35,8 @@ from PyQt6.QtGui import (
     QFont,
     QFontMetrics,
     QGuiApplication,
+    QImage,
+    QLinearGradient,
     QMouseEvent,
     QPainter,
     QPixmap,
@@ -119,6 +122,8 @@ class CaptionOverlay(QWidget):
     DEDUP_WINDOW_MS = 4000         # time-window to ignore duplicate originals
     IDLE_CLEAR_MS = 20000          # clear all when no events for this long
     ANIM_DURATION_MS = 280         # fade + slide duration when caption changes
+    HIGHLIGHT_MS = 2000            # tint behind a NEW utterance, fading out
+    TOPMOST_EVERY_MS = 1000        # re-assert the topmost band (see _keep_on_top)
 
     def __init__(self, app_config: AppConfig, parent: QWidget | None = None):
         super().__init__(parent)
@@ -140,6 +145,16 @@ class CaptionOverlay(QWidget):
         self._anim_timer = QTimer(self)
         self._anim_timer.setInterval(33)  # ~30fps
         self._anim_timer.timeout.connect(self._tick_animation)
+        self._highlight_started_ms: float = -1e12
+        # PowerPoint in slideshow (and Teams/Zoom) raise themselves above
+        # every topmost window when they take over the screen;
+        # WindowStaysOnTopHint is set once and loses that race. Re-assert on
+        # a heartbeat, the way mature caption overlays do — never raise_()
+        # (it flickers) and never by activating (it would steal the slides'
+        # focus).
+        self._topmost_timer = QTimer(self)
+        self._topmost_timer.setInterval(self.TOPMOST_EVERY_MS)
+        self._topmost_timer.timeout.connect(self._keep_on_top)
 
         self._dragging = False
         self._drag_offset = QPoint()
@@ -695,11 +710,15 @@ class CaptionOverlay(QWidget):
     def _start_animation(self) -> None:
         """Kick off a fade+slide animation for the current state change."""
         self._anim_started_ms = self._now_ms()
+        self._highlight_started_ms = self._anim_started_ms
         if not self._anim_timer.isActive():
             self._anim_timer.start()
 
     def _tick_animation(self) -> None:
-        if self._now_ms() - self._anim_started_ms >= self.ANIM_DURATION_MS:
+        span = self.ANIM_DURATION_MS
+        if getattr(self.overlay_config, "highlight_new_text", True):
+            span = max(span, self.HIGHLIGHT_MS)
+        if self._now_ms() - self._anim_started_ms >= span:
             self._anim_timer.stop()
         self._request_repaint()
 
@@ -711,6 +730,48 @@ class CaptionOverlay(QWidget):
         t = elapsed / self.ANIM_DURATION_MS
         # cubic-out easing: 1 - (1-t)^3
         return 1.0 - (1.0 - t) ** 3
+
+    def _highlight_strength(self) -> float:
+        """1.0 when the newest utterance just arrived, 0.0 after HIGHLIGHT_MS."""
+        if not getattr(self.overlay_config, "highlight_new_text", True):
+            return 0.0
+        elapsed = self._now_ms() - self._highlight_started_ms
+        if elapsed < 0 or elapsed >= self.HIGHLIGHT_MS:
+            return 0.0
+        return 1.0 - elapsed / self.HIGHLIGHT_MS
+
+    def _highlight_tint(self) -> QColor:
+        """Light tint on a dark band, dark tint on a light one."""
+        light_bg = QColor(self.overlay_config.background_color).lightnessF() > 0.5
+        return QColor("#000000") if light_bg else QColor("#FFFFFF")
+
+    # ------------------------------------------------------------------ topmost
+
+    def showEvent(self, event):  # type: ignore[override]
+        super().showEvent(event)
+        self._keep_on_top()
+        self._topmost_timer.start()
+
+    def hideEvent(self, event):  # type: ignore[override]
+        self._topmost_timer.stop()
+        super().hideEvent(event)
+
+    def _keep_on_top(self) -> None:
+        """Put the band back at the top of the topmost band, without focus."""
+        if sys.platform != "win32" or not self.isVisible():
+            return
+        try:
+            import ctypes
+            hwnd_topmost = ctypes.c_void_p(-1)
+            swp_nosize, swp_nomove, swp_noactivate, swp_noownerzorder = 0x1, 0x2, 0x10, 0x200
+            ctypes.windll.user32.SetWindowPos(
+                ctypes.c_void_p(int(self.winId())), hwnd_topmost, 0, 0, 0, 0,
+                swp_nomove | swp_nosize | swp_noactivate | swp_noownerzorder)
+        except Exception:
+            # Cosmetic: the band is already WindowStaysOnTop. Never let this
+            # cost the caption — log once and stop trying.
+            log.exception("could not re-assert the topmost caption window")
+            self._topmost_timer.stop()
 
     def set_hidden_by_operator(self, hidden: bool) -> None:
         """Esconder/mostrar por decisão do operador — dura até ele desfazer."""
@@ -948,6 +1009,7 @@ class CaptionOverlay(QWidget):
         x = cfg.padding
         y = cfg.padding
         inner_width = self.width() - cfg.padding * 2 - 14  # leave space for color bar
+        overflow = False
 
         if getattr(cfg, "stable_height", True):
             # The band does not grow with the text, so the text must yield:
@@ -1013,13 +1075,35 @@ class CaptionOverlay(QWidget):
                 heights = _heights()
             self._fit_lock = (cur_key, size)
             last_idx = len(lines) - 1
-            if getattr(cfg, "anchor_newest", True):
+            overflow = sum(heights) > available
+            if overflow:
+                # Even at the hard floor the sentence is taller than the band.
+                # Keep its END: pin the block to the bottom and let the start
+                # leave through the top, faded over one line so a half-cut
+                # row does not show. Top-anchoring here cut off the words
+                # being spoken right now — the part the room is reading.
+                y = self.height() - cfg.padding - sum(heights)
+            elif getattr(cfg, "anchor_newest", True):
                 # Bottom-anchor the block inside the fixed band so the NEWEST
                 # line always renders at the same spot and older lines push
                 # upward. Top-anchoring inside a fixed band moves every line
                 # down as the block grows — the same jitter, just relocated.
                 y = max(cfg.padding, self.height() - cfg.padding - sum(heights))
 
+        target, layer = painter, None
+        if overflow:
+            dpr = self.devicePixelRatioF()
+            layer = QImage(max(1, int(self.width() * dpr)), max(1, int(self.height() * dpr)),
+                           QImage.Format.Format_ARGB32_Premultiplied)
+            layer.setDevicePixelRatio(dpr)
+            layer.fill(Qt.GlobalColor.transparent)
+            target = QPainter(layer)
+            target.setRenderHint(QPainter.RenderHint.Antialiasing)
+            target.setClipRect(0, cfg.padding // 2, self.width(), self.height() - cfg.padding // 2)
+
+        newest = len(self._history) - 1
+        glow = self._highlight_strength()
+        tint = self._highlight_tint()
         prev_utt = None
         for idx, (is_primary, text, alpha, lang_color, utt) in enumerate(lines):
             if not text:
@@ -1045,17 +1129,25 @@ class CaptionOverlay(QWidget):
 
             block_height = line_height * len(wrapped) + 4
 
+            if glow > 0 and utt == newest:
+                tinted = QColor(tint)
+                tinted.setAlphaF((0.16 if tint.lightnessF() > 0.5 else 0.12) * glow)
+                target.setBrush(tinted)
+                target.setPen(Qt.PenStyle.NoPen)
+                target.drawRoundedRect(x - 6, y + slide_offset - 2,
+                                       self.width() - 2 * x + 12, block_height + 2, 8, 8)
+
             # Draw left-side color bar for this utterance (language indicator)
             if lang_color:
                 bar_color = QColor(lang_color)
                 bar_color.setAlphaF(line_alpha * 0.85)
-                painter.setBrush(bar_color)
-                painter.setPen(Qt.PenStyle.NoPen)
+                target.setBrush(bar_color)
+                target.setPen(Qt.PenStyle.NoPen)
                 # Wider on the projection: the colour is how a reader across
                 # the room finds their language's line.
                 bar_w = (self.LANG_BAR_PX_PRESENTATION if self._presentation
                          else self.LANG_BAR_PX)
-                painter.drawRoundedRect(
+                target.drawRoundedRect(
                     self._bar_x(cfg, bar_w),
                     y + slide_offset,
                     bar_w,
@@ -1068,10 +1160,24 @@ class CaptionOverlay(QWidget):
                     else self.LANG_BAR_PX) if lang_color else 0)
             text_x = max(x + 4, self._bar_x(cfg, _bw) + _bw + 10) if _bw else x + 4
             for line in wrapped:
-                self._draw_line(painter, line, text_x, y + slide_offset,
+                self._draw_line(target, line, text_x, y + slide_offset,
                                 font, base, outline_color, line_alpha)
                 y += line_height
             y += 6
+
+        if layer is not None:
+            # Fade the top line out (DestinationIn keeps only what the
+            # gradient's alpha allows), then lay the text over the band.
+            top = cfg.padding // 2
+            fade = QFontMetrics(primary_font).lineSpacing()
+            grad = QLinearGradient(0, top, 0, top + fade)
+            grad.setColorAt(0.0, QColor(0, 0, 0, 0))
+            grad.setColorAt(1.0, QColor(0, 0, 0, 255))
+            target.setClipping(False)
+            target.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+            target.fillRect(0, 0, self.width(), top + fade, grad)
+            target.end()
+            painter.drawImage(0, 0, layer)
 
         # Latency badge (top-right corner) — small, dim. Operator telemetry,
         # so never on the projected band.

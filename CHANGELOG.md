@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-12
+
+Quatro ideias tiradas do Sokuji (AGPL-3.0), reimplementadas — nada copiado.
+Plano em `docs/plans/2026-10-12-ideias-do-sokuji.md`.
+
+### Fixed
+
+- **Frase longa demais cortava o fim.** Quando nem a 16 pt a frase cabia na
+  caixa, ela começava no topo e as últimas linhas — o que está sendo dito
+  agora — ficavam de fora. Agora o fim fica sempre visível e o começo sai
+  pelo topo, esmaecido ao longo de uma linha.
+- **PowerPoint em apresentação podia cobrir a legenda.** O "sempre no topo"
+  era pedido uma vez só; agora a faixa o reafirma a cada segundo, sem roubar
+  o foco dos slides e sem se mover.
+
+### Added
+
+- **Fim de frase da Azure** (Configurações → Azure): por pausa (padrão), por
+  pontuação — para palestrante que emenda tudo sem pausar — ou por pausa com
+  teto de 20 s por frase.
+- **Destaque da fala nova:** a frase que acabou de chegar aparece com um
+  fundo levemente tingido que some em 2 s. Desligável em
+  `overlay.highlight_new_text`.
+
 ## [0.12.0] - 2026-09-25
 
 Reportado pelo operador: "Não consigo mover as caixas de legenda, nem

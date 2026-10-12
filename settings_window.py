@@ -553,6 +553,16 @@ class SettingsWindow(QDialog):
         self.azure_streaming_check = QCheckBox("Ativar streaming single-language")
         gl.addRow(self.azure_streaming_check)
 
+        # Como a Azure decide que uma frase acabou. "Por pausa" é o padrão do
+        # serviço; para palestrante que emenda tudo sem pausar, "Por pontuação"
+        # fecha a frase no ponto final e evita o bloco de texto que não acaba.
+        self.azure_segmentation_combo = QComboBox()
+        for code, label in (("default", "Por pausa (padrão)"),
+                            ("semantic", "Por pontuação (palestrante que não pausa)"),
+                            ("time", "Por pausa, com teto de 20 s por frase")):
+            self.azure_segmentation_combo.addItem(label, code)
+        gl.addRow("Fim de frase:", self.azure_segmentation_combo)
+
         self.azure_streaming_lang_combo = QComboBox()
         for code, label in KNOWN_LANGUAGES.items():
             self.azure_streaming_lang_combo.addItem(label, code)
@@ -1520,6 +1530,8 @@ class SettingsWindow(QDialog):
 
         # Azure streaming controls
         self.azure_streaming_check.setChecked(self.config.azure_streaming_mode)
+        self.azure_segmentation_combo.setCurrentIndex(
+            max(0, self.azure_segmentation_combo.findData(self.config.azure_segmentation)))
         idx = self.azure_streaming_lang_combo.findData(self.config.azure_streaming_language)
         if idx >= 0:
             self.azure_streaming_lang_combo.setCurrentIndex(idx)
@@ -1638,6 +1650,7 @@ class SettingsWindow(QDialog):
             azure_speech_key=self.azure_key_input_credentials.text().strip(),
             azure_speech_region=self.azure_region_input_credentials.text().strip() or "brazilsouth",
             azure_streaming_mode=self.azure_streaming_check.isChecked(),
+            azure_segmentation=self.azure_segmentation_combo.currentData() or "default",
             azure_streaming_language=(
                 self.azure_streaming_lang_combo.currentData() or "pt-BR"
             ),

@@ -160,6 +160,7 @@ def _construct(
             samplerate=app_config.audio.samplerate,
             streaming_mode=app_config.azure_streaming_mode,
             streaming_language=app_config.azure_streaming_language,
+            segmentation=app_config.azure_segmentation,
             # Lido do disco a cada construcao do provider, nao guardado na
             # config: o operador edita o arquivo entre sessoes, e uma copia em
             # memoria ficaria velha justamente quando ele acabou de corrigir
