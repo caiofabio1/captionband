@@ -14,10 +14,13 @@ Plano em `docs/plans/2026-10-12-ideias-do-sokuji.md`.
 
 ### Fixed
 
-- **Frase longa demais cortava o fim.** Quando nem a 16 pt a frase cabia na
-  caixa, ela começava no topo e as últimas linhas — o que está sendo dito
-  agora — ficavam de fora. Agora o fim fica sempre visível e o começo sai
-  pelo topo, esmaecido ao longo de uma linha.
+- **A letra mudava de tamanho em tempo real, e frase longa cortava o fim.**
+  A faixa encolhia a fonte para a frase caber, o que fazia o tamanho mudar
+  de uma frase para outra — leitura cansativa, relatou o operador. E quando
+  nem a 16 pt cabia, as últimas linhas (o que está sendo dito) ficavam de
+  fora. Agora a fonte **nunca muda de tamanho**: frase que não cabe rola
+  para cima, como a legenda "roll-up" da TV e o Sokuji — o fim fica preso
+  embaixo e o começo sai pelo topo, esmaecido ao longo de uma linha.
 - **PowerPoint em apresentação podia cobrir a legenda.** O "sempre no topo"
   era pedido uma vez só; agora a faixa o reafirma a cada segundo, sem roubar
   o foco dos slides e sem se mover.

@@ -8,7 +8,9 @@ MIT; só as ideias foram reimplementadas.
 
 ## O que entra (0.13.0)
 
-1. **Frase que não cabe nem a 16 pt guarda o fim.** O bloco é ancorado na borda
+1. **Fonte fixa, frase longa rola para cima** (revisto no mesmo dia, a pedido do Caio:
+   o auto-ajuste de fonte tornava a leitura cansativa; foi removido). Frase que não
+   cabe guarda o fim. O bloco é ancorado na borda
    de baixo e o começo sai pelo topo, esmaecido ao longo de uma linha. Antes
    saía o fim — as palavras sendo ditas. Referência no Sokuji:
    `src/components/Subtitle/SubtitleStream.scss` (modo compacto).

@@ -179,20 +179,21 @@ class TestHistoryYieldsBeforeTheType:
         finally:
             overlay.close()
 
-    def test_a_shrunk_sentence_keeps_its_size_until_the_next_one(self, qapp, monkeypatch):
-        """Refitting from the configured size on every partial made the type
-        pulse mid-sentence. The size is held per utterance."""
+    def test_the_type_size_never_changes_even_when_a_sentence_overflows(self, qapp, monkeypatch):
+        """Reportado pelo operador: o tamanho da letra mudando em tempo real
+        torna a leitura cansativa. Frase que não cabe ROLA (sai pelo topo);
+        a letra fica no tamanho configurado — curta, longa ou reescrita."""
         overlay = CaptionOverlay(_cfg(max_history=0, reserved_lines=1))
         overlay.resize(600, overlay.height())
         overlay.show()
         qapp.processEvents()
         try:
             _push(overlay, qapp, " ".join([LONGA] * 3), rid="r1", final=False)
-            partial = {pt for *_r, pt in _drawn_pt(monkeypatch, overlay, qapp)}
-            assert partial and max(partial) < 25, "a frase longa devia forçar encolher"
+            longa = _drawn_pt(monkeypatch, overlay, qapp)
+            assert longa[0][0] < 0, "a frase devia transbordar para o teste valer"
+            assert {pt for *_r, pt in longa} == {25}
             _push(overlay, qapp, "curta", rid="r1", final=True)   # same utterance, rewritten
-            final = {pt for *_r, pt in _drawn_pt(monkeypatch, overlay, qapp)}
-            assert final == partial, f"pulsou dentro da fala: {partial} -> {final}"
+            assert {pt for *_r, pt in _drawn_pt(monkeypatch, overlay, qapp)} == {25}
             _push(overlay, qapp, "outra curta", rid="r2")
             assert {pt for *_r, pt in _drawn_pt(monkeypatch, overlay, qapp)} == {25}
         finally:

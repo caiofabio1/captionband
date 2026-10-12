@@ -174,10 +174,6 @@ class CaptionOverlay(QWidget):
         self._current_block_lines = 0
         # Rendered lines, keyed by text + type + colours (see _line_pixmap).
         self._line_cache: OrderedDict[tuple, QPixmap] = OrderedDict()
-        # (created_at_ms of the newest utterance, point size it was fitted
-        # at): the size a sentence shrank to is kept while THAT sentence keeps
-        # changing (partials, then the final). See _paint.
-        self._fit_lock: tuple[float | None, int] | None = None
         self._repaint_timer = QTimer(self)
         self._repaint_timer.setSingleShot(True)
         self._repaint_timer.setInterval(self.REPAINT_MIN_MS)
@@ -478,7 +474,6 @@ class CaptionOverlay(QWidget):
         if len(self._history) > self._max_total:
             self._history = self._history[-self._max_total:]
         self._line_cache.clear()
-        self._fit_lock = None
         self._set_click_through(self.overlay_config.click_through)
         self._apply_position()
         self._request_repaint()
@@ -492,7 +487,6 @@ class CaptionOverlay(QWidget):
         # memory made the Settings preview drop its own sample caption on
         # the second click (same text within DEDUP_WINDOW_MS) — blank band.
         self._recent_seen.clear()
-        self._fit_lock = None
         self._request_repaint()
 
     # ------------------------------------------------------------------ dedup
@@ -510,13 +504,6 @@ class CaptionOverlay(QWidget):
     LANG_BAR_PX_PRESENTATION = 22
     # Folga vertical entre FALAS (nao entre os idiomas de uma mesma fala).
     UTTERANCE_GAP_PX = 14
-
-    # Floor for shrinking the type, reached only when the current utterance
-    # ALONE does not fit the band. Below this it is unreadable from the back
-    # of a room.
-    MIN_FIT_PT_HARD = 16
-    # Point size step while shrinking. 4 overshoots on small fonts.
-    FIT_STEP_PT = 2
 
     # Hard ceiling on the dedup window, independent of time. DEDUP_WINDOW_MS
     # already bounds it in principle, but only for entries that pass through
@@ -1037,51 +1024,31 @@ class CaptionOverlay(QWidget):
                 return out
 
             available = self.height() - cfg.padding * 2
-            ratio = cfg.secondary_font_size / max(1, cfg.primary_font_size)
-            step = self.FIT_STEP_PT
-
-            def _fonts(pt: int) -> None:
-                nonlocal primary_font, secondary_font
-                primary_font = QFont(cfg.font_family, pt, QFont.Weight.Bold)
-                secondary_font = QFont(
-                    cfg.font_family, max(self.MIN_FIT_PT_HARD, int(pt * ratio)),
-                    QFont.Weight.Normal)
-
-            # The size a sentence already shrank to stays while THAT sentence
-            # keeps changing (partials, then the final). Refitting from the
-            # configured size on every event made the type pulse
-            # mid-sentence, which on a 4 m screen reads as flicker.
-            cur_key = self._history[-1].created_at_ms if self._history else None
-            size = cfg.primary_font_size
-            if self._fit_lock is not None and self._fit_lock[0] == cur_key:
-                size = min(size, self._fit_lock[1])
-                _fonts(size)
             heights = _heights()
+            # The type NEVER changes size while captions run. Shrinking a
+            # sentence to fit made the letters change size from one sentence
+            # to the next, and the operator found reading tiring for exactly
+            # that reason. Mature live-caption displays keep one size and
+            # scroll instead: the roll-up captions of broadcast TV, and the
+            # Sokuji overlay (fixed font, newest text pinned to the bottom,
+            # overflow leaving through the top).
+            #
             # Order, for a room reading from the back: drop OLDER utterances
-            # first, and shrink the type only when the newest utterance alone
-            # still does not fit. Shrinking first kept more history on screen
-            # at a size nobody past the third row could read. The newest
-            # utterance is never cut: with "spoken + EN + ES" an older rule
-            # dropped the Portuguese and the English of the CURRENT sentence
-            # and left only Spanish — the languages alternated from one
-            # sentence to the next.
+            # first. The newest utterance is never cut: with "spoken + EN +
+            # ES" an older rule dropped the Portuguese and the English of the
+            # CURRENT sentence and left only Spanish — the languages
+            # alternated from one sentence to the next.
             keep = max(1, self._current_block_lines)
             while len(lines) > keep and sum(heights) > available:
                 lines.pop(0)
                 heights.pop(0)
-            while sum(heights) > available and size - step >= self.MIN_FIT_PT_HARD:
-                size -= step
-                _fonts(size)
-                heights = _heights()
-            self._fit_lock = (cur_key, size)
             last_idx = len(lines) - 1
             overflow = sum(heights) > available
             if overflow:
-                # Even at the hard floor the sentence is taller than the band.
-                # Keep its END: pin the block to the bottom and let the start
-                # leave through the top, faded over one line so a half-cut
-                # row does not show. Top-anchoring here cut off the words
-                # being spoken right now — the part the room is reading.
+                # The sentence alone is taller than the band: roll it up.
+                # Pin the block to the bottom so the words being spoken now
+                # stay in place, and let the start leave through the top,
+                # faded over one line so a half-cut row does not show.
                 y = self.height() - cfg.padding - sum(heights)
             elif getattr(cfg, "anchor_newest", True):
                 # Bottom-anchor the block inside the fixed band so the NEWEST
