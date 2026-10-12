@@ -12,7 +12,7 @@ from __future__ import annotations
 
 APP_NAME = "CaptionBand"
 APP_DISPLAY_NAME = "CaptionBand"
-APP_VERSION = "0.13.0"  # keep in step with installer.iss and pyproject.toml
+APP_VERSION = "0.13.1"  # keep in step with installer.iss and pyproject.toml
 APP_GITHUB_REPO = "caiofabio1/captionband"
 
 
@@ -98,13 +98,19 @@ AZURE_SEGMENTATION_SILENCE_MS = 400
 # partial, which is unreadable from the back of a room.
 AZURE_STABLE_PARTIAL_THRESHOLD = 5
 # Segmentation strategy (Speech_SegmentationStrategy). "default" sets nothing:
-# the service closes a phrase on silence. "semantic" closes at sentence-ending
-# punctuation instead — Microsoft documents it against the "wall of text" a
-# speaker who never pauses produces. "time" keeps silence segmentation but
+# the service closes a phrase on silence. "time" keeps silence segmentation but
 # caps a phrase: as it approaches AZURE_SEGMENTATION_MAX_TIME_MS the silence
 # timeout shrinks until the phrase closes. Documented range 20000-70000 ms.
 # learn.microsoft.com/azure/ai-services/speech-service/how-to-recognize-speech
-AZURE_SEGMENTATION_STRATEGIES = ("default", "semantic", "time")
+#
+# NOT "Semantic". Microsoft documents it for speech-to-text; on the TRANSLATION
+# recognizer it is broken. MEASURED 2026-10-12 against the real service, 20 s
+# of synthesized Portuguese: Semantic gave 0 partials and 0 finals, default
+# gave 21 partials and 4 finals. In the live app the session was cancelled
+# within 3 s with "Error code: 1007. Could not validate speech context",
+# every time — the translation never started. A saved "semantic" now falls
+# back to "default" (see AzureProvider).
+AZURE_SEGMENTATION_STRATEGIES = ("default", "time")
 AZURE_SEGMENTATION_MAX_TIME_MS = 20000
 
 # Azure: at-start language identification accepts at most 4 candidate

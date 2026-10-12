@@ -159,8 +159,9 @@ class AppConfig:
     # (incremental "word-by-word with correction" via the `recognizing` event).
     # Trade-off: must know the source language up front (no Continuous LID).
     azure_streaming_mode: bool = False
-    # How Azure decides a phrase has ended: "default" (silence), "semantic"
-    # (sentence punctuation) or "time" (silence with a 20 s cap). See
+    # How Azure decides a phrase has ended: "default" (silence) or "time"
+    # (silence with a 20 s cap). "semantic" is accepted from old configs and
+    # treated as "default" — it breaks the translation recognizer. See
     # constants.AZURE_SEGMENTATION_STRATEGIES. Changing it restarts the session.
     azure_segmentation: str = "default"
     # Currently active source language when streaming_mode is on. Tray menu /

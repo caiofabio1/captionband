@@ -3,7 +3,7 @@
 ; Output: Output\CaptionBandSetup.exe
 
 #define AppName "CaptionBand"
-#define AppVersion "0.13.0"
+#define AppVersion "0.13.1"
 #define AppPublisher "CaptionBand"
 #define AppExeName "CaptionBand.exe"
 

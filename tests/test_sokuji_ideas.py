@@ -122,18 +122,22 @@ class TestFimDeFraseDaAzure:
         from constants import AZURE_SEGMENTATION_MAX_TIME_MS
         from providers.azure import segmentation_properties
         pid = speechsdk.PropertyId
-        assert segmentation_properties("semantic") == [(pid.Speech_SegmentationStrategy, "Semantic")]
+        # Medido contra a Azure: com "Semantic" o reconhecedor de TRADUÇÃO não
+        # devolve nada e a sessão cai com erro 1007 — a tradução não iniciava.
+        assert segmentation_properties("semantic") == []
         props = dict(segmentation_properties("time"))
         assert props[pid.Speech_SegmentationStrategy] == "Time"
         # Faixa documentada pela Microsoft: 20000-70000 ms.
         assert 20000 <= int(props[pid.Speech_SegmentationMaximumTimeMs]) <= 70000
         assert AZURE_SEGMENTATION_MAX_TIME_MS == int(props[pid.Speech_SegmentationMaximumTimeMs])
 
-    def test_valor_desconhecido_vira_padrao(self):
+    @pytest.mark.parametrize("salvo", ["xpto", "semantic"])
+    def test_valor_desconhecido_ou_semantic_vira_padrao(self, salvo):
+        """Quem salvou "Por pontuação" na 0.13.0 não pode continuar sem tradução."""
         from providers.azure import AzureProvider
         p = AzureProvider(speech_key="k", region="brazilsouth", source_languages=["pt-BR"],
                           target_languages=["es"], on_event=lambda *a, **k: None,
-                          segmentation="xpto")
+                          segmentation=salvo)
         assert p.segmentation == "default"
 
     def test_o_provider_recebe_a_escolha_da_config(self, monkeypatch):
@@ -153,8 +157,9 @@ class TestFimDeFraseDaAzure:
         w = SettingsWindow(AppConfig(azure_segmentation="time"))
         try:
             assert w.azure_segmentation_combo.currentData() == "time"
-            w.azure_segmentation_combo.setCurrentIndex(w.azure_segmentation_combo.findData("semantic"))
-            assert w._build_config().azure_segmentation == "semantic"
+            assert w.azure_segmentation_combo.findData("semantic") == -1, "opção quebrada voltou à tela"
+            w.azure_segmentation_combo.setCurrentIndex(w.azure_segmentation_combo.findData("default"))
+            assert w._build_config().azure_segmentation == "default"
         finally:
             w.close()
 

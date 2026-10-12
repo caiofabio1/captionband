@@ -554,12 +554,12 @@ class SettingsWindow(QDialog):
         gl.addRow(self.azure_streaming_check)
 
         # Como a Azure decide que uma frase acabou. "Por pausa" é o padrão do
-        # serviço; para palestrante que emenda tudo sem pausar, "Por pontuação"
-        # fecha a frase no ponto final e evita o bloco de texto que não acaba.
+        # serviço; o teto de 20 s fecha a frase de quem emenda tudo sem pausar.
+        # Sem "por pontuação": na tradução de fala a Azure não devolve nada
+        # com ela (medido; ver constants.AZURE_SEGMENTATION_STRATEGIES).
         self.azure_segmentation_combo = QComboBox()
         for code, label in (("default", "Por pausa (padrão)"),
-                            ("semantic", "Por pontuação (palestrante que não pausa)"),
-                            ("time", "Por pausa, com teto de 20 s por frase")):
+                            ("time", "Por pausa, com teto de 20 s por frase (palestrante que não pausa)")):
             self.azure_segmentation_combo.addItem(label, code)
         gl.addRow("Fim de frase:", self.azure_segmentation_combo)
 

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-10-12
+
+### Fixed
+
+- **A tradução não iniciava com "Fim de frase: Por pontuação".** A Azure
+  cancelava a sessão em 2-3 s com "Error code: 1007. Could not validate
+  speech context", toda vez, e sem reserva configurada a legenda parava.
+  Medido contra o serviço real: com a estratégia "Semantic" o reconhecedor de
+  **tradução** não devolve nenhum resultado (0 parciais, 0 finais em 20 s de
+  fala), enquanto o padrão devolve 21 parciais e 4 frases. A opção saiu da
+  tela; quem a salvou volta sozinho ao padrão "Por pausa". Fica a opção
+  "Por pausa, com teto de 20 s por frase", que funciona (medido).
+
 ## [0.13.0] - 2026-10-12
 
 Quatro ideias tiradas do Sokuji (AGPL-3.0), reimplementadas — nada copiado.

@@ -97,8 +97,6 @@ def segmentation_properties(strategy: str) -> list[tuple]:
     caller always sets that one.
     """
     pid = speechsdk.PropertyId
-    if strategy == "semantic":
-        return [(pid.Speech_SegmentationStrategy, "Semantic")]
     if strategy == "time":
         return [(pid.Speech_SegmentationStrategy, "Time"),
                 (pid.Speech_SegmentationMaximumTimeMs, str(AZURE_SEGMENTATION_MAX_TIME_MS))]
